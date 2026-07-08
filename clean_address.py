@@ -1948,6 +1948,9 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
         protect_until = 3  # UBND: protect first 3 words (e.g. "Ủy Ban Xã" / "UBND Xã")
     elif norms[0] in {"cho", "chua", "den"} or toks[0][0].strip(" ,.-–/:").lower() == "sở":
         protect_until = 4  # Chợ/Chùa/Đền/Sở: protect first 4 words
+    for i in range(len(norms)):
+        if " ".join(norms[i:i + 4]) == "trung tam y te":
+            protect_until = max(protect_until, i + 7)
     cut = None
     cut_by_street = False
     for i, n in enumerate(norms):
@@ -1967,10 +1970,13 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
         is_route = phrase2 in {"quoc lo", "tinh lo", "huong lo", "dai lo", "cao toc"}
         force_admin_tail = is_known_admin_here and raw in {"xã", "xa", "phường", "phuong", "p", "x"}
         protected_tt_abbrev = raw == "tt" and i > 0 and norms[i - 1] == "cntt"
+        is_admin_prefix_word = (
+            raw in {"xã", "xa", "phường", "phuong", "quận", "quan", "huyện", "huyen", "tỉnh", "tinh", "tp", "tt", "tx", "p", "q", "h", "x", "t"}
+            or n in {"xa", "phuong", "quan", "huyen", "tinh", "tp", "tt", "tx", "p", "q", "h", "x", "t"}
+        )
         is_admin_tail = (
             i >= 2 and not protected_tt_abbrev and (i >= protect_until or force_admin_tail) and
-            (raw in {"xã", "xa", "phường", "phuong", "quận", "quan", "huyện", "huyen", "tỉnh", "tinh", "tp", "tt", "tx", "p", "q", "h", "x", "t"}
-             or raw_phrase2 in {"thành phố", "thanh pho", "thị xã", "thi xa", "thị trấn", "thi tran"})
+            (is_admin_prefix_word or raw_phrase2 in {"thành phố", "thanh pho", "thị xã", "thi xa", "thị trấn", "thi tran"})
         )
         is_address_code_tail = (
             i >= 2
@@ -1997,7 +2003,7 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
         is_recipient_tail = (
             i >= 2 and (
                 phrase2 in {"nguoi nhan", "dia chi", "khach hang", "ten kh"}
-                or raw in {"chị", "chi", "anh", "cô", "co", "em"}
+                or (i >= protect_until and raw in {"chị", "chi", "anh", "cô", "co", "em"})
             )
         )
         if is_street or is_route or is_admin_tail or is_level4 or is_recipient_tail or is_address_code_tail or n in {"ql", "tl", "hl", "dt"}:
@@ -2013,6 +2019,17 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
         seg = re.sub(r"\s+" + HOUSE_TOKEN_V2 + r"\s*$", " ", seg, flags=re.I)
     seg = _trim_admin_tail_aliases_v2(seg, admin_tail_aliases or set())
     return _clean_spaces_v2(seg)
+
+
+def _trim_leading_person_before_poi_v2(seg, poi_start_tok):
+    toks, _norms = _word_spans_v2(seg)
+    if poi_start_tok <= 1 or not toks:
+        return seg
+    for split in range(min(4, poi_start_tok), 1, -1):
+        prefix = seg[toks[0][1]:toks[split - 1][2]]
+        if is_customer_name(prefix):
+            return seg[toks[split][1]:].strip(" ,.-–/:")
+    return seg
 
 
 def _extract_pois_v2(segments, admin_aliases, admin_tail_aliases=None):
@@ -2034,6 +2051,17 @@ def _extract_pois_v2(segments, admin_aliases, admin_tail_aliases=None):
         if not toks:
             continue
         start_tok = max(0, kw_idx)
+        trimmed = _trim_leading_person_before_poi_v2(seg, start_tok)
+        if trimmed != seg:
+            seg = trimmed
+            found = _find_poi_keyword_v2(seg)
+            if not found:
+                continue
+            kw_idx, _, kw_phrase = found
+            toks, norms = _word_spans_v2(seg)
+            if not toks:
+                continue
+            start_tok = max(0, kw_idx)
         before = norms[:start_tok]
         before_has_signal = any(
             w in {
@@ -2047,6 +2075,11 @@ def _extract_pois_v2(segments, admin_aliases, admin_tail_aliases=None):
         before_has_note_marker = any(
             w in {"dia", "chi", "giao", "hang", "nguoi", "nhan", "goi", "gui", "ve", "lo"}
             for w in before
+        )
+        before_is_department = bool(
+            before
+            and any(w in {"khoa", "phong"} for w in before)
+            and kw_phrase in {"trung tam y te", "ttyt", "tram y te", "benh vien", "bv", "truong"}
         )
         if before_has_signal:
             continue
@@ -2066,7 +2099,7 @@ def _extract_pois_v2(segments, admin_aliases, admin_tail_aliases=None):
         if kw_phrase == "den" and raw_kw != "đền":
             continue
 
-        if before and (len(before) <= 4 or before_has_note_marker):
+        if before and not before_is_department and (len(before) <= 4 or before_has_note_marker):
             if not before_has_signal:
                 seg = seg[toks[start_tok][1]:]
         if re.match(r"^(?:sau|phia sau|dang sau|gan|doi dien|ben canh)\s+", _norm_match_v2(seg)):
@@ -2424,13 +2457,24 @@ def _strip_alley_noise_v2(detail):
 
 
 def _strip_leading_house_before_street_v2(detail):
-    return re.sub(
-        r"^\s*\d+[A-Za-zĐđ]?\s+(?=(?:đường|duong|phố|pho|"
-        r"quốc\s*lộ|quoc\s*lo|tỉnh\s*lộ|tinh\s*lo|đt|dt|ql|tl|hl)\b)",
+    street_prefix = (
+        r"(?:đường|duong|phố|pho|quốc\s*lộ|quoc\s*lo|"
+        r"tỉnh\s*lộ|tinh\s*lo|đt|dt|ql|tl|hl)"
+    )
+    detail = re.sub(
+        r"^\s*\d+[A-Za-zĐđ]?(?:\s+[A-Za-zĐđ](?=\s+" + street_prefix + r"\b))?\s+"
+        r"(?=" + street_prefix + r"\b)",
         "",
         detail,
         flags=re.I,
-    ).strip(" ,.-–/:")
+    )
+    detail = re.sub(
+        r"^\s*[A-Za-zĐđ]\s+(?=" + street_prefix + r"\b)",
+        "",
+        detail,
+        flags=re.I,
+    )
+    return detail.strip(" ,.-–/:")
 
 
 def _is_alley_only_v2(detail):
