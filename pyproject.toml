@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vn-address-cleaner"
+version = "0.1.0"
+description = "Clean Vietnamese shipping address Excel files into POI, street, level-4, ward, district, province columns."
+requires-python = ">=3.10"
+dependencies = [
+    "openpyxl>=3.1",
+]
+
+[project.scripts]
+vn-address-clean = "vn_address_cleaner.cli:main"
+
+[tool.setuptools]
+packages = ["vn_address_cleaner"]
+py-modules = ["clean_address", "parse_address"]
+
+[tool.setuptools.package-data]
+vn_address_cleaner = ["data/vn_units_data.json"]
