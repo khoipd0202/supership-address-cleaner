@@ -16,3 +16,9 @@ cache_diachi.sqlite
 node_modules
 scratch/
 danh_ba_khach.json
+README_LIBRARY.md
+address_clean_data_criteria.md
+address_test_server.py
+address_ui.py
+build_reference.py
+.DS_Store
