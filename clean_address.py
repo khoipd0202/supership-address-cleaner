@@ -2523,6 +2523,20 @@ def _is_level4_stop_v2(norms, idx):
     return False
 
 
+def _is_ambiguous_khu_code_level4_v2(unit_key, raw_name):
+    if unit_key != "khu":
+        return False
+    name_norm = _norm_match_v2(raw_name)
+    if not name_norm:
+        return False
+    if re.search(r"\d", name_norm):
+        return False
+    if _has_vn_diacritic_v2(raw_name):
+        return False
+    words = name_norm.split()
+    return len(words) <= 2 and all(re.fullmatch(r"[a-z]{1,4}", w) for w in words)
+
+
 def _extract_level4s_v2(text, admin_aliases=None):
     admin_aliases = admin_aliases or set()
     toks, norms = _word_spans_v2(text)
@@ -2612,6 +2626,9 @@ def _extract_level4s_v2(text, admin_aliases=None):
             raw_name = text[toks[got[0]][1]:toks[got[-1]][2]]
             val = f"{unit_display} {_pretty_piece_v2(raw_name)}".strip()
             val = re.sub(r"\s+", " ", val).strip(" ,.-")
+            if _is_ambiguous_khu_code_level4_v2(unit_key, raw_name):
+                i = got[-1] + 1
+                continue
             if not _has_safe_diacritics_for_component_v2(val, "level4"):
                 i = got[-1] + 1
                 continue
@@ -2731,13 +2748,13 @@ def _strip_leading_address_junk_v2(seg):
 
 def _detail_after_explicit_house_marker_v2(seg):
     house_number = (
-        r"\d+(?:\s*[/\-\.]\s*\d+)*"
+        r"\d+[A-Za-zĐđ]?(?:\s*[/\-\.]\s*[A-Za-zĐđ]?\d+[A-Za-zĐđ]?)*"
         r"(?:[A-Za-zĐđ](?=\s|[,.\-–/]|$)|\s+[A-Za-zĐđ](?=\s|[,.\-–/]|$))?"
     )
     pattern = re.compile(
         r"\b(?:số\s*nhà|so\s*nha|số|so|sn|nhà|nha)\s*"
         + house_number
-        + r"\s*(?P<detail>[^\d\s,./\-–].*)$",
+        + r"\s*[,.;:\-–/]?\s*(?P<detail>[^\d\s,./\-–].*)$",
         re.I,
     )
     for match in reversed(list(pattern.finditer(seg or ""))):
@@ -2908,7 +2925,7 @@ def _strip_leading_house_before_street_v2(detail):
         flags=re.I,
     )
     detail = re.sub(
-        r"^\s*[A-Za-zĐđ]\s+(?=" + street_prefix + r"\b)",
+        r"^\s*[A-Za-zĐđ]\.?\s+(?=" + street_prefix + r"\b)",
         "",
         detail,
         flags=re.I,
