@@ -1556,6 +1556,8 @@ PRODUCT_BRANDS_V2 = {
     "redmi", "tecno", "infinix",
 }
 
+INVALID_VN_SHORT_MARKERS_V2 = {"f", "j", "z", "w"}
+
 CENTRAL_CITY_CORES_V2 = {
     "ha noi", "ho chi minh", "hai phong", "da nang", "can tho",
 }
@@ -1757,6 +1759,7 @@ def _build_admin_aliases_v2(admin_names):
             aliases.add(initials)
         if norm.startswith("phuong ") and core:
             aliases.update({f"p {core}", f"p.{core}", f"p{core.replace(' ', '')}"})
+            aliases.update({f"f {core}", f"f.{core}", f"f{core.replace(' ', '')}"})
         if norm.startswith("xa ") and core:
             aliases.update({f"x {core}", f"x.{core}", f"x{core.replace(' ', '')}"})
         if norm.startswith("quan ") and core:
@@ -1873,7 +1876,7 @@ def _starts_with_admin_alias_v2(seg, aliases):
         return True
     admin_prefixes = (
         "phuong", "xa", "thi tran", "quan", "huyen", "thanh pho", "tinh",
-        "tp", "tt", "tx", "p", "q", "h", "x", "t",
+        "tp", "tt", "tx", "p", "f", "q", "h", "x", "t",
     )
     return any(n == p or n.startswith(p + " ") for p in admin_prefixes)
 
@@ -2395,6 +2398,8 @@ def _is_level4_stop_v2(norms, idx):
         "giao", "sdt", "dt", "cod",
     }:
         return True
+    if n in INVALID_VN_SHORT_MARKERS_V2:
+        return True
     if _level4_unit_at_v2(norms, idx):
         return True
     return False
@@ -2471,6 +2476,8 @@ def _extract_level4s_v2(text, admin_aliases=None):
                     break
                 break
             if MONEY_WEIGHT_RE_V2.match(norms[j]):
+                break
+            if norms[j] in INVALID_VN_SHORT_MARKERS_V2:
                 break
             if norms[j] in {"cu", "moi"}:
                 break
@@ -2627,6 +2634,7 @@ def _cleanup_street_detail_v2(detail):
     detail = _clean_spaces_v2(detail)
     detail = re.sub(r"\s*[.;]\s*[A-Za-z]\d+\s*[:：].*$", " ", detail, flags=re.I)
     detail = re.sub(r"\s+[.;]?\s*(?:thu|thu hộ|thu ho|cod)\s*[:：\-]?\s*\d+[.,]?\d*\s*k?.*$", " ", detail, flags=re.I)
+    detail = re.sub(r"\s*[\.,;:/\-–]*\s*\b[fjzw]\b\.?\s*\d{0,2}[a-z]?\s*$", " ", detail, flags=re.I)
     toks, norms = _word_spans_v2(detail)
     if not toks:
         return _clean_spaces_v2(detail)
@@ -2675,7 +2683,10 @@ def _cut_detail_tail_v2(text, admin_aliases):
         if unit_info and not invalid_level4_word:
             cut = toks[i][1]
             break
-        if raws[i] in {"xã", "xa", "phường", "phuong", "quận", "quan", "huyện", "huyen", "tỉnh", "tinh", "tp", "tt", "tx", "p", "q", "h", "x", "t"}:
+        if i > 0 and norms[i] in INVALID_VN_SHORT_MARKERS_V2:
+            cut = toks[i][1]
+            break
+        if raws[i] in {"xã", "xa", "phường", "phuong", "quận", "quan", "huyện", "huyen", "tỉnh", "tinh", "tp", "tt", "tx", "p", "f", "q", "h", "x", "t"}:
             # Chỉ cắt khi token tiếp theo rõ ràng là tên admin, KHÔNG cắt khi
             # đây là từ cuối segment tên đường (vd "Đường Ao Quan" — "Quan" là
             # phần tên, không phải tiền tố Quận).
@@ -2684,7 +2695,7 @@ def _cut_detail_tail_v2(text, admin_aliases):
                 street_kw_positions and max(street_kw_positions) >= i - 3
             )
             strong_admin_marker = (
-                raw in {"xã", "xa", "phường", "phuong", "tp", "tt", "tx", "p", "q", "h", "x", "t"}
+                raw in {"xã", "xa", "phường", "phuong", "tp", "tt", "tx", "p", "f", "q", "h", "x", "t"}
                 or phrase2_raw in {"thành phố", "thanh pho", "thị xã", "thi xa", "thị trấn", "thi tran"}
             )
             nxt_norm = norms[i + 1] if i + 1 < len(norms) else ""
@@ -2825,6 +2836,8 @@ def _looks_like_street_v2(detail):
     if not n:
         return False
     if n in {"puong", "pường"}:
+        return False
+    if any(w in INVALID_VN_SHORT_MARKERS_V2 for w in n.split()):
         return False
     if n in {"nha", "so nha"} or n.startswith(("nha ", "so nha ")):
         return False
