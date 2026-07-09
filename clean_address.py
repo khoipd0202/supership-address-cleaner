@@ -1558,6 +1558,32 @@ PRODUCT_BRANDS_V2 = {
 
 INVALID_VN_SHORT_MARKERS_V2 = {"f", "j", "z", "w"}
 
+SUSPICIOUS_MISSING_DIACRITIC_WORDS_V2 = {
+    "ba", "bac", "binh", "chau", "chien", "cong", "dinh", "do", "doan",
+    "dong", "duc", "giap", "hiep", "hieu", "hoa", "hoang", "hong", "huu",
+    "huyen", "kieu", "lam", "le", "loi", "nghia", "nguyen", "phu", "phuc",
+    "quoc", "son", "tai", "tam", "tan", "thang", "thao", "that",
+    "tho", "thuong", "thuan", "thuy", "tien", "tran", "tri", "truong",
+    "tuan", "van", "vien", "viet", "vinh", "xuan", "yen",
+}
+
+STRONG_MISSING_DIACRITIC_WORDS_V2 = {
+    "cong", "dat", "dong", "huu", "le", "nguyen", "pham", "quoc", "tran",
+    "van", "viet", "xuan",
+}
+
+VN_DIACRITIC_RE_V2 = re.compile(
+    r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩ"
+    r"òóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ"
+    r"ÀÁẠẢÃÂẦẤẬẨẪĂẰẮẶẲẴÈÉẸẺẼÊỀẾỆỂỄÌÍỊỈĨ"
+    r"ÒÓỌỎÕÔỒỐỘỔỖƠỜỚỢỞỠÙÚỤỦŨƯỪỨỰỬỮỲÝỴỶỸĐ]"
+)
+
+INVALID_VN_COMPONENT_CHAR_RE_V2 = re.compile(r"[fzÿö\[\]{}<>]", re.I)
+KNOWN_BAD_DIACRITIC_WORDS_V2 = {"hiêu", "kÿ", "mÿ", "thãt", "viêt"}
+RAW_BAD_SPELLING_RE_V2 = re.compile(r"\b(?:qhu|puong|phurong|durong|durrong|duongg)\b")
+BUON_MA_THUOT_ADMIN_ALIASES_V2 = {"buon me thuot", "buon ma thuot", "buon ma thuoc"}
+
 CENTRAL_CITY_CORES_V2 = {
     "ha noi", "ho chi minh", "hai phong", "da nang", "can tho",
 }
@@ -1641,6 +1667,96 @@ def _clean_spaces_v2(s):
     s = re.sub(r"\s*,\s*", ", ", s)
     s = re.sub(r",{2,}", ",", s)
     return s.strip(" ,.-")
+
+
+def _has_vn_diacritic_v2(text):
+    return bool(VN_DIACRITIC_RE_V2.search(str(text or "")))
+
+
+def _strip_component_prefix_for_diacritic_check_v2(text, kind):
+    text = _clean_spaces_v2(text)
+    if kind == "street":
+        text = re.sub(
+            r"^\s*(?:đường|duong|phố|pho|ngõ|ngo|ngách|ngach|hẻm|hem|kiệt|kiet|"
+            r"quốc\s*lộ|quoc\s*lo|tỉnh\s*lộ|tinh\s*lo|hương\s*lộ|huong\s*lo|"
+            r"đại\s*lộ|dai\s*lo|ql|tl|hl|dt|đt)\b\.?\s*",
+            "",
+            text,
+            flags=re.I,
+        )
+        text = re.sub(r"^\s*(?:số|so)\b\.?\s*", "", text, flags=re.I)
+    elif kind == "level4":
+        text = re.sub(
+            r"^\s*(?:thôn|thon|xóm|xom|ấp|ap|tổ\s*dân\s*phố|to\s*dan\s*pho|"
+            r"tổ|to|khu\s*phố|khu\s*pho|kp|khu|khối|khoi|đội|doi|bản|ban|"
+            r"buôn|buon|làng|lang|sóc|soc|khóm|khom|tiểu\s*khu|tieu\s*khu|"
+            r"cụm\s*dân\s*cư|cum\s*dan\s*cu)\b\.?\s*",
+            "",
+            text,
+            flags=re.I,
+        )
+    return _clean_spaces_v2(text)
+
+
+def _is_code_or_number_only_component_v2(text):
+    n = _norm_match_v2(text)
+    if not n:
+        return False
+    if re.fullmatch(r"(?:so\s*)?\d+[a-z]?", n):
+        return True
+    if re.fullmatch(r"(?:ql|tl|hl|dt)\s*\d+[a-z]?", n):
+        return True
+    if re.fullmatch(r"[a-z]{0,4}\d+[a-z0-9]*", n):
+        return True
+    if re.fullmatch(r"[a-z]", n):
+        return True
+    return False
+
+
+def _has_suspicious_missing_diacritic_word_v2(text, strong_only=False):
+    suspicious_words = (
+        STRONG_MISSING_DIACRITIC_WORDS_V2
+        if strong_only
+        else SUSPICIOUS_MISSING_DIACRITIC_WORDS_V2
+    )
+    for word in re.findall(r"[A-Za-zÀ-ỹĐđ]+", str(text or "")):
+        if _has_vn_diacritic_v2(word):
+            continue
+        if strip_diacritics(word.lower()) in suspicious_words:
+            return True
+    return False
+
+
+def _has_known_bad_component_spelling_v2(text):
+    if INVALID_VN_COMPONENT_CHAR_RE_V2.search(str(text or "")):
+        return True
+    for word in re.findall(r"[A-Za-zÀ-ỹĐđ]+", str(text or "").lower()):
+        if word in KNOWN_BAD_DIACRITIC_WORDS_V2:
+            return True
+    return False
+
+
+def _has_raw_bad_spelling_v2(text):
+    return bool(RAW_BAD_SPELLING_RE_V2.search(_norm_match_v2(text)))
+
+
+def _has_safe_diacritics_for_component_v2(text, kind):
+    core = _strip_component_prefix_for_diacritic_check_v2(text, kind)
+    typo_norm = _norm_match_v2(core or text)
+    if re.search(r"\b(?:qhu|puong|phurong)\b", typo_norm):
+        return False
+    if _has_known_bad_component_spelling_v2(core):
+        return False
+    if not core:
+        return True
+    if _is_code_or_number_only_component_v2(core):
+        return True
+    has_diacritic = _has_vn_diacritic_v2(core)
+    if _has_suspicious_missing_diacritic_word_v2(core, strong_only=has_diacritic):
+        return False
+    if has_diacritic:
+        return True
+    return True
 
 
 def _pretty_piece_v2(s):
@@ -1790,6 +1906,7 @@ def _build_admin_aliases_v2(admin_names):
         "dong nai": ["dnai"],
         "quang ninh": ["qn"],
         "dak lak": ["daklak", "dac lak", "daclak"],
+        "buon ma thuot": ["buon me thuot", "buon ma thuoc", "bmt", "buonmathuot", "buonmethuot"],
     }
     for full, abbrs in province_abbrs.items():
         if full in aliases or full in joined:
@@ -1836,7 +1953,7 @@ def _build_admin_tail_aliases_v2(admin_names):
         "quang ninh": ["qn"],
         "dak lak": ["daklak", "dac lak", "daclak"],
         # Buôn Ma Thuột có nhiều cách viết phổ biến trong thực tế
-        "buon ma thuot": ["buon me thuot", "buon me thuột", "bmt", "buonmathuot", "buonmethuot"],
+        "buon ma thuot": ["buon me thuot", "buon ma thuoc", "bmt", "buonmathuot", "buonmethuot"],
     }
     for full, abbrs in province_abbrs.items():
         if full in aliases or full in joined:
@@ -2445,7 +2562,7 @@ def _extract_level4s_v2(text, admin_aliases=None):
         if unit_key == "khom" and raws[i] not in {"khóm", "khom"}:
             i += 1
             continue
-        if unit_key == "buon" and " ".join(norms[i:i + 3]) in {"buon me thuot", "buon ma thuot"}:
+        if unit_key == "buon" and " ".join(norms[i:i + 3]) in BUON_MA_THUOT_ADMIN_ALIASES_V2:
             i += 1
             continue
         is_admin_phrase = False
@@ -2493,8 +2610,10 @@ def _extract_level4s_v2(text, admin_aliases=None):
                 got = [got[0]]
             raw_name = text[toks[got[0]][1]:toks[got[-1]][2]]
             val = f"{unit_display} {_pretty_piece_v2(raw_name)}".strip()
-            val = re.sub(r"\bQhu\s+Não\b", "Phú Não", val, flags=re.I)
             val = re.sub(r"\s+", " ", val).strip(" ,.-")
+            if not _has_safe_diacritics_for_component_v2(val, "level4"):
+                i = got[-1] + 1
+                continue
             key = _norm_match_v2(val)
             if key and key not in seen:
                 seen.add(key)
@@ -2673,7 +2792,7 @@ def _cut_detail_tail_v2(text, admin_aliases):
                 (unit_info[0] == "ban" and raws[i] != "bản")
                 or (unit_info[0] == "soc" and raws[i] != "sóc")
                 or (unit_info[0] == "lang" and raws[i] != "làng")
-                or (unit_info[0] == "buon" and " ".join(norms[i:i + 3]) in {"buon me thuot", "buon ma thuot"})
+                or (unit_info[0] == "buon" and " ".join(norms[i:i + 3]) in BUON_MA_THUOT_ADMIN_ALIASES_V2)
                 or (unit_info[0] == "to" and raws[i] not in {"tổ", "to"})
                 or (unit_info[0] == "khoi" and raws[i] not in {"khối", "khoi"})
                 or (unit_info[0] == "doi" and raws[i] not in {"đội", "doi"})
@@ -2929,6 +3048,8 @@ def _extract_streets_v2(segments, admin_aliases):
         if not _looks_like_street_v2(detail):
             continue
         pretty = _pretty_street_v2(detail)
+        if not _has_safe_diacritics_for_component_v2(pretty, "street"):
+            continue
         key = _norm_match_v2(pretty)
         if key in {"duong", "pho", "ngo", "ngach", "hem", "kiet", "ql", "tl", "hl", "dt"}:
             continue
@@ -2953,6 +3074,8 @@ def _extract_unprefixed_level4_after_known_v2(segments, admin_aliases, existing_
             continue
         if _starts_with_admin_alias_v2(cur, admin_aliases):
             continue
+        if _is_old_new_admin_tail_segment_v2(cur):
+            continue
         if HOUSE_LIKE_RE_V2.match(cur):
             continue
         if _has_street_keyword_v2(cur) or _is_house_only_v2(cur) or _find_poi_keyword_v2(cur):
@@ -2965,11 +3088,20 @@ def _extract_unprefixed_level4_after_known_v2(segments, admin_aliases, existing_
             continue
         if len(n.split()) > 4:
             continue
+        if not _has_safe_diacritics_for_component_v2(candidate, "level4"):
+            continue
         key = _norm_match_v2(candidate)
         if key and key not in seen:
             seen.add(key)
             out.append({"value": _pretty_piece_v2(candidate), "type": "unprefixed", "pos": 100000 + idx})
     return out
+
+
+def _is_old_new_admin_tail_segment_v2(seg):
+    n = _norm_match_v2(seg)
+    if not n:
+        return False
+    return bool(re.search(r"\b(?:cu|moi|nay|thuoc)\b", n))
 
 
 def _is_house_only_v2(seg):
@@ -3170,10 +3302,9 @@ def parse_address_components(raw, admin_names=None, debug=False):
     if _detect_admin_conflict_v2(parse_text, admin_aliases):
         flags.append("RAW_ADMIN_CONFLICT_WITH_COLUMNS")
 
+    raw_has_bad_spelling = _has_raw_bad_spelling_v2(parse_text)
     pois = _extract_pois_v2(segments, admin_aliases, admin_tail_aliases)
     streets = _extract_streets_v2(segments, admin_aliases)
-    if streets:
-        flags.append("STREET_FOUND_FROM_HOUSE_NUMBER")
     level4_segments = [
         seg for seg in segments
         if not _starts_with_admin_alias_v2(seg, admin_aliases)
@@ -3185,16 +3316,25 @@ def parse_address_components(raw, admin_names=None, debug=False):
         existing_values=[x["value"] for x in level4_items],
     ))
     level4_items.sort(key=lambda x: x["pos"])
-    level4 = "; ".join(x["value"] for x in level4_items)
-    level4_primary, level4_sub = _choose_level4_primary_v2(level4_items)
     local_details = _extract_local_details_v2(
         segments,
         admin_aliases,
-        existing_values=pois + streets + [level4],
+        existing_values=pois + streets + [x["value"] for x in level4_items],
     )
     if local_details:
         flags.append("LOCAL_DETAIL_FOUND")
         streets.extend(local_details)
+    if raw_has_bad_spelling and (streets or level4_items):
+        removed_parts.extend(streets)
+        removed_parts.extend(x["value"] for x in level4_items)
+        streets = []
+        level4_items = []
+        flags.append("RAW_BAD_SPELLING_DROPPED_DETAIL")
+    level4_items.sort(key=lambda x: x["pos"])
+    level4 = "; ".join(x["value"] for x in level4_items)
+    level4_primary, level4_sub = _choose_level4_primary_v2(level4_items)
+    if streets:
+        flags.append("STREET_FOUND_FROM_HOUSE_NUMBER")
 
     if len(pois) > 1:
         flags.append("MULTIPLE_POI_FOUND")
