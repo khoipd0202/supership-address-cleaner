@@ -1583,6 +1583,7 @@ INVALID_VN_COMPONENT_CHAR_RE_V2 = re.compile(r"[fzÿö\[\]{}<>]", re.I)
 KNOWN_BAD_DIACRITIC_WORDS_V2 = {"hiêu", "kÿ", "mÿ", "thãt", "viêt"}
 RAW_BAD_SPELLING_RE_V2 = re.compile(r"\b(?:qhu|puong|phurong|durong|durrong|duongg)\b")
 BUON_MA_THUOT_ADMIN_ALIASES_V2 = {"buon me thuot", "buon ma thuot", "buon ma thuoc"}
+STRICT_DROP_DETAIL_FLAGS_V2 = {"RAW_ADMIN_CONFLICT_WITH_COLUMNS", "LOW_CONFIDENCE"}
 
 CENTRAL_CITY_CORES_V2 = {
     "ha noi", "ho chi minh", "hai phong", "da nang", "can tho",
@@ -2754,6 +2755,13 @@ def _cleanup_street_detail_v2(detail):
     detail = re.sub(r"\s*[.;]\s*[A-Za-z]\d+\s*[:：].*$", " ", detail, flags=re.I)
     detail = re.sub(r"\s+[.;]?\s*(?:thu|thu hộ|thu ho|cod)\s*[:：\-]?\s*\d+[.,]?\d*\s*k?.*$", " ", detail, flags=re.I)
     detail = re.sub(r"\s*[\.,;:/\-–]*\s*\b[fjzw]\b\.?\s*\d{0,2}[a-z]?\s*$", " ", detail, flags=re.I)
+    detail = re.sub(
+        r"\s+\b(?:chạy|chay|vào|vao|vô|vo|đi|di|đến|den|qua|gần|gan|sau|"
+        r"trước|truoc|đối\s*diện|doi\s*dien)\b.*$",
+        " ",
+        detail,
+        flags=re.I,
+    )
     toks, norms = _word_spans_v2(detail)
     if not toks:
         return _clean_spaces_v2(detail)
@@ -3372,15 +3380,30 @@ def parse_address_components(raw, admin_names=None, debug=False):
     level4_primary, level4_sub = _choose_level4_primary_v2(level4_items)
 
     poi = " | ".join(pois)
+    street = " | ".join(streets)
     confidence = _score_result_v2(poi, level4, flags)
     if confidence < 0.75 and "LOW_CONFIDENCE" not in flags:
         flags.append("LOW_CONFIDENCE")
+        confidence = _score_result_v2(poi, level4, flags)
+    if (poi or street or level4) and any(flag in flags for flag in STRICT_DROP_DETAIL_FLAGS_V2):
+        removed_parts.extend([x for x in [poi, street, level4] if x])
+        poi = ""
+        street = ""
+        level4 = ""
+        level4_primary = ""
+        level4_sub = ""
+        if "STRICT_DROPPED_DETAIL" not in flags:
+            flags.append("STRICT_DROPPED_DETAIL")
+        if "NO_POI_FOUND" not in flags:
+            flags.append("NO_POI_FOUND")
+        if "NO_LEVEL4_FOUND" not in flags:
+            flags.append("NO_LEVEL4_FOUND")
         confidence = _score_result_v2(poi, level4, flags)
 
     result = {
         "raw_address": raw_text,
         "poi": poi,
-        "street": " | ".join(streets),
+        "street": street,
         "level4": level4,
         "level4_primary": level4_primary,
         "level4_sub": level4_sub,
