@@ -1671,9 +1671,23 @@ def _pretty_piece_v2(s):
     return s.strip(" ,.-")
 
 
+def _pretty_street_v2(s):
+    s = _pretty_piece_v2(s)
+    street_fixes = [
+        (r"^Duong\b", "Đường"), (r"^Pho\b", "Phố"),
+        (r"^Ngo\b", "Ngõ"), (r"^Hem\b", "Hẻm"),
+        (r"^Kiet\b", "Kiệt"),
+    ]
+    for pat, repl in street_fixes:
+        s = re.sub(pat, repl, s)
+    return s
+
+
 def _normalize_abbrev_v2(s):
     s = unicodedata.normalize("NFC", str(s or ""))
     s = re.sub(r"\bkhu\s*dc\b", "Khu Dân Cư", s, flags=re.I)
+    s = re.sub(r"([A-Za-zÀ-ỹĐđ]{2,})([qpxh]\d{1,2})(?=\b)", r"\1 \2", s, flags=re.I)
+    s = re.sub(r"\b(số|so|sn|nhà|nha)(?=\d)", r"\1 ", s, flags=re.I)
     s = re.sub(r"\b[đd]\s*[\.,/]\s*c\b", "Địa chỉ", s, flags=re.I)
     s = re.sub(r"\bđ/c\b|\bd/c\b|\bđc\b|\bdc\b", "Địa chỉ", s, flags=re.I)
     s = re.sub(r"\bsnha\b|\bsn\b", "Số nhà", s, flags=re.I)
@@ -1946,8 +1960,10 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
         protect_until = 6
     elif norms[0] in {"ubnd"} or " ".join(norms[:2]) in {"uy ban"}:
         protect_until = 3  # UBND: protect first 3 words (e.g. "Ủy Ban Xã" / "UBND Xã")
-    elif norms[0] in {"cho", "chua", "den"} or toks[0][0].strip(" ,.-–/:").lower() == "sở":
-        protect_until = 4  # Chợ/Chùa/Đền/Sở: protect first 4 words
+    elif norms[0] == "cho":
+        protect_until = 2
+    elif norms[0] in {"chua", "den"} or toks[0][0].strip(" ,.-–/:").lower() == "sở":
+        protect_until = 4  # Chùa/Đền/Sở: protect first 4 words
     for i in range(len(norms)):
         if " ".join(norms[i:i + 4]) == "trung tam y te":
             protect_until = max(protect_until, i + 7)
@@ -2194,6 +2210,9 @@ def _extract_level4s_v2(text, admin_aliases=None):
             i += 1
             continue
         unit_key, unit_display, unit_len = unit_info
+        if unit_key == "to" and raws[i] not in {"tổ", "to"}:
+            i += 1
+            continue
         if unit_key == "ban" and raws[i] != "bản":
             i += 1
             continue
@@ -2255,6 +2274,7 @@ def _extract_level4s_v2(text, admin_aliases=None):
                 got = [got[0]]
             raw_name = text[toks[got[0]][1]:toks[got[-1]][2]]
             val = f"{unit_display} {_pretty_piece_v2(raw_name)}".strip()
+            val = re.sub(r"\bQhu\s+Não\b", "Phú Não", val, flags=re.I)
             val = re.sub(r"\s+", " ", val).strip(" ,.-")
             key = _norm_match_v2(val)
             if key and key not in seen:
@@ -2306,7 +2326,7 @@ def _street_keyword_matches_v2(seg):
                 yield toks[i][1], toks[i][2]
             continue
         if n == "pho" and raw in {"phố", "pho"}:
-            if prev in {"khu", "thanh"}:
+            if prev in {"khu", "thanh", "dan"}:
                 continue
             yield toks[i][1], toks[i][2]
             continue
@@ -2316,7 +2336,12 @@ def _street_keyword_matches_v2(seg):
         ):
             yield toks[i][1], toks[min(i + 1, len(toks) - 1)][2]
             continue
-        if n in {"dt", "ql", "tl", "hl"} or re.fullmatch(r"(?:dt|ql|tl|hl)\d+[a-z]?", n):
+        if n in {"dt", "ql", "tl", "hl"}:
+            nxt = norms[i + 1] if i + 1 < len(norms) else ""
+            if re.fullmatch(r"\d+[a-z]?", nxt):
+                yield toks[i][1], toks[i][2]
+            continue
+        if re.fullmatch(r"(?:dt|ql|tl|hl)\d+[a-z]?", n):
             yield toks[i][1], toks[i][2]
 
 
@@ -2365,6 +2390,24 @@ def _strip_leading_address_junk_v2(seg):
     return re.sub(r"\s+", " ", seg).strip(" ,.-–/:")
 
 
+def _detail_after_explicit_house_marker_v2(seg):
+    house_number = (
+        r"\d+(?:\s*[/\-\.]\s*\d+)*"
+        r"(?:[A-Za-zĐđ](?=\s|[,.\-–/]|$)|\s+[A-Za-zĐđ](?=\s|[,.\-–/]|$))?"
+    )
+    pattern = re.compile(
+        r"\b(?:số\s*nhà|so\s*nha|số|so|sn|nhà|nha)\s*"
+        + house_number
+        + r"\s*(?P<detail>[^\d\s,./\-–].*)$",
+        re.I,
+    )
+    for match in reversed(list(pattern.finditer(seg or ""))):
+        detail = _clean_spaces_v2(match.group("detail"))
+        if detail:
+            return detail
+    return ""
+
+
 def _cut_detail_tail_v2(text, admin_aliases):
     toks, norms = _word_spans_v2(text)
     if not toks:
@@ -2379,6 +2422,7 @@ def _cut_detail_tail_v2(text, admin_aliases):
     }
     cut = None
     for i, n in enumerate(norms):
+        raw = raws[i]
         phrase2_raw = " ".join(raws[i:i + 2])
         unit_info = _level4_unit_at_v2(norms, i)
         invalid_level4_word = (
@@ -2388,6 +2432,7 @@ def _cut_detail_tail_v2(text, admin_aliases):
                 or (unit_info[0] == "soc" and raws[i] != "sóc")
                 or (unit_info[0] == "lang" and raws[i] != "làng")
                 or (unit_info[0] == "buon" and " ".join(norms[i:i + 3]) in {"buon me thuot", "buon ma thuot"})
+                or (unit_info[0] == "to" and raws[i] not in {"tổ", "to"})
             )
         )
         if unit_info and not invalid_level4_word:
@@ -2401,10 +2446,14 @@ def _cut_detail_tail_v2(text, admin_aliases):
             protected_by_street = bool(
                 street_kw_positions and max(street_kw_positions) >= i - 3
             )
+            strong_admin_marker = (
+                raw in {"xã", "xa", "phường", "phuong", "tp", "tt", "tx", "p", "q", "h", "x", "t"}
+                or phrase2_raw in {"thành phố", "thanh pho", "thị xã", "thi xa", "thị trấn", "thi tran"}
+            )
             nxt_norm = norms[i + 1] if i + 1 < len(norms) else ""
             if not nxt_norm:
                 # Token cuối — chỉ cắt nếu không nằm sau street keyword và không phải tên đường
-                if not starts_with_named_street and not protected_by_street:
+                if strong_admin_marker or (not starts_with_named_street and not protected_by_street):
                     cut = toks[i][1]
                     break
             else:
@@ -2417,7 +2466,7 @@ def _cut_detail_tail_v2(text, admin_aliases):
                         for L in range(1, min(5, len(norms) - i))
                     )
                 )
-                if nxt_is_admin and not protected_by_street:
+                if strong_admin_marker or (nxt_is_admin and not protected_by_street):
                     cut = toks[i][1]
                     break
         if phrase2_raw in {"thành phố", "thị xã", "thị trấn"}:
@@ -2439,6 +2488,13 @@ def _cut_detail_tail_v2(text, admin_aliases):
                 break
     text = text[:cut] if cut is not None else text
     text = re.sub(r"\b(?:cũ|cu|mới|moi|nay|thuộc|thuoc)\b.*$", " ", text, flags=re.I)
+    text = re.sub(
+        r"\b(?:số\s*nhà|so\s*nha|nhà|nha)\s*"
+        r"\d+[A-Za-zĐđ]?(?:\s*[/\-\.]\s*\d+[A-Za-zĐđ]?)*\s*$",
+        " ",
+        text,
+        flags=re.I,
+    )
     return _clean_spaces_v2(text)
 
 
@@ -2505,11 +2561,16 @@ def _looks_like_street_v2(detail):
         return False
     if re.fullmatch(r"(ql|tl|hl|dt)\s*\d+[a-z]?", n):
         return True
+    if re.fullmatch(r"[a-z]{1,4}\d+[a-z0-9]*", n):
+        return False
     if re.fullmatch(r"(?:\d+[a-z]?|[a-z])", n):
         return False
     if n.startswith(("khu do thi", "khu cong nghiep", "khu che xuat", "khu dan cu")):
         return False
-    if _level4_unit_at_v2(n.split(), 0):
+    toks, norms = _word_spans_v2(detail)
+    raws = [unicodedata.normalize("NFC", w.lower()).strip(" ,.-–/:") for w, _, _ in toks]
+    unit_info = _level4_unit_at_v2(norms, 0) if norms else None
+    if unit_info and not (unit_info[0] == "to" and raws and raws[0] not in {"tổ", "to"}):
         return False
     if n in {"cu", "moi"}:
         return False
@@ -2518,9 +2579,10 @@ def _looks_like_street_v2(detail):
         "thanh pho", "thi xa", "thi tran",
     )):
         return False
-    if _find_poi_keyword_v2(detail):
-        return False
     words = n.split()
+    starts_with_street_keyword = bool(words and words[0] in {"duong", "pho"})
+    if _find_poi_keyword_v2(detail) and not starts_with_street_keyword:
+        return False
     return 1 <= len(words) <= 7
 
 
@@ -2545,7 +2607,7 @@ def _extract_streets_v2(segments, admin_aliases):
         seg = _strip_leading_address_junk_v2(seg)
         if not seg:
             continue
-        detail = ""
+        detail = _detail_after_explicit_house_marker_v2(seg)
         if _is_house_only_v2(seg) and idx + 1 < len(segments):
             next_seg = _strip_leading_address_junk_v2(segments[idx + 1])
             if next_seg and not _starts_with_admin_alias_v2(next_seg, admin_aliases):
@@ -2572,8 +2634,10 @@ def _extract_streets_v2(segments, admin_aliases):
         detail = _strip_leading_house_before_street_v2(detail)
         if not _looks_like_street_v2(detail):
             continue
-        pretty = _pretty_piece_v2(detail)
+        pretty = _pretty_street_v2(detail)
         key = _norm_match_v2(pretty)
+        if key in {"duong", "pho", "ngo", "ngach", "hem", "kiet", "ql", "tl", "hl", "dt"}:
+            continue
         if key and key not in seen:
             seen.add(key)
             streets.append(pretty)
@@ -2594,6 +2658,8 @@ def _extract_unprefixed_level4_after_known_v2(segments, admin_aliases, existing_
         if not _has_admin_ahead_v2(segments, idx, admin_aliases):
             continue
         if _starts_with_admin_alias_v2(cur, admin_aliases):
+            continue
+        if HOUSE_LIKE_RE_V2.match(cur):
             continue
         if _has_street_keyword_v2(cur) or _is_house_only_v2(cur) or _find_poi_keyword_v2(cur):
             continue
