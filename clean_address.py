@@ -1546,10 +1546,19 @@ NOTE_KEYWORDS_V2 = [
     "mien ship", "free ship", "freeship", "ship nhe", "ship nha",
     "goi truoc", "dung goi", "gio hanh chinh", "gio hanh chanh",
     "thu ho", "cod", "khach tra", "chi tra", "anh tra", "em tra",
-    "sai mau", "sai size", "sai mau", "khong giong hinh", "ko giong hinh",
+    "sai mau", "sai size", "sai m", "sai mau", "khong giong hinh", "ko giong hinh",
     "cho xem hang", "dong kiem", "hang de vo", "huy don", "khong lay",
-    "ko lay", "trua", "chieu", "toi", "tranh thu", "khi chua nhap",
+    "ko lay", "tranh thu", "khi chua nhap",
 ]
+
+PRODUCT_BRANDS_V2 = {
+    "vivo", "iphone", "oppo", "samsung", "xiaomi", "realme", "nokia",
+    "redmi", "tecno", "infinix",
+}
+
+CENTRAL_CITY_CORES_V2 = {
+    "ha noi", "ho chi minh", "hai phong", "da nang", "can tho",
+}
 
 POI_PHRASES_V2 = [
     "truong", "mam non", "mn", "tieu hoc", "thcs", "thpt", "dai hoc",
@@ -1673,6 +1682,9 @@ def _pretty_piece_v2(s):
 
 def _pretty_street_v2(s):
     s = _pretty_piece_v2(s)
+    s = re.sub(r"\b(\d+)([A-Za-zÀ-ỹĐđ]{2,})\b", r"\1 \2", s)
+    s = re.sub(r"(?<=\d\s)([A-ZÀ-ỸĐ]{2,})(?=\b)", lambda m: _titlecase_vn(m.group(1)), s)
+    s = re.sub(r"\bĐường\s+So\b", "Đường Số", s, flags=re.I)
     street_fixes = [
         (r"^Duong\b", "Đường"), (r"^Pho\b", "Phố"),
         (r"^Ngo\b", "Ngõ"), (r"^Hem\b", "Hẻm"),
@@ -1686,9 +1698,13 @@ def _pretty_street_v2(s):
 def _normalize_abbrev_v2(s):
     s = unicodedata.normalize("NFC", str(s or ""))
     s = re.sub(r"\bkhu\s*dc\b", "Khu Dân Cư", s, flags=re.I)
+    s = re.sub(r"\b([pxqh])\.?\s*(\d{1,2})([qxph]\d{1,2})(?=\b)", r"\1\2 \3", s, flags=re.I)
     s = re.sub(r"([A-Za-zÀ-ỹĐđ]{2,})([qpxh]\d{1,2})(?=\b)", r"\1 \2", s, flags=re.I)
+    s = re.sub(r"\b(\d+)([A-Za-zÀ-ỹĐđ]{2,})(?=\s|$)", r"\1 \2", s)
     s = re.sub(r"\b(số|so|sn|nhà|nha)(?=\d)", r"\1 ", s, flags=re.I)
     s = re.sub(r"\b[đd]\s*[\.,/]\s*c\b", "Địa chỉ", s, flags=re.I)
+    s = re.sub(r"\bng\.\s*", "Ngõ ", s, flags=re.I)
+    s = re.sub(r"\b[đd]\.(?!\s*c)\s*", "Đường ", s, flags=re.I)
     s = re.sub(r"\bđ/c\b|\bd/c\b|\bđc\b|\bdc\b", "Địa chỉ", s, flags=re.I)
     s = re.sub(r"\bsnha\b|\bsn\b", "Số nhà", s, flags=re.I)
     s = re.sub(r"\btthcs\b", "Trường THCS", s, flags=re.I)
@@ -1884,6 +1900,31 @@ def _strip_intro_v2(s):
     ).strip()
 
 
+def _has_product_note_signal_v2(text):
+    n = _norm_match_v2(text)
+    if not n:
+        return False
+    words = set(n.split())
+    has_brand = bool(words & PRODUCT_BRANDS_V2)
+    has_model_or_price = bool(
+        re.search(r"\b[a-z]{1,4}\d+[a-z0-9]*\b", n)
+        or re.search(r"\b\d+[.,]?\d*k\b", n)
+    )
+    if has_brand and has_model_or_price:
+        return True
+    if "nghe nano" in n or ("nano" in words and ("plus" in words or re.search(r"\d", n))):
+        return True
+    if n.startswith("sua ") and len(n.split()) <= 4:
+        return True
+    clothes_words = {"ao", "quan", "vay", "dam", "giay", "dep", "tui"}
+    product_modifiers = {"mau", "size", "sz", "sai"}
+    if (words & clothes_words) and (words & product_modifiers):
+        return True
+    if re.search(r"\bq\d{4,}\b", n) and (words & (product_modifiers | clothes_words)):
+        return True
+    return False
+
+
 def _is_note_segment_v2(seg):
     n = _norm_match_v2(seg)
     if not n:
@@ -1894,11 +1935,17 @@ def _is_note_segment_v2(seg):
             return True
     if re.search(r"\bt[2-7]\b|\bchu nhat\b|\bthu\s*[2-7]\b", n):
         return True
+    if re.fullmatch(r"(trua|chieu|toi|sang)", n):
+        return True
+    if re.search(r"\b(?:giao|ship|goi|nhan|lay|hen)\b.{0,24}\b(?:trua|chieu|toi|sang)\b", n):
+        return True
     if re.search(r"\b(?:cao|nang)\s*\d", n):
         return True
     if re.fullmatch(r"(ok|nhe|nha|a|e|em|chi|anh|vietnam|viet nam)", n):
         return True
     if re.fullmatch(r"(size|sz|mau|kg|cod|thu ho|phi ship|cuoc).*", n):
+        return True
+    if _has_product_note_signal_v2(seg):
         return True
     return False
 
@@ -1942,6 +1989,162 @@ def _word_spans_v2(s):
     toks = [(m.group(), m.start(), m.end()) for m in re.finditer(r"[^\W_]+", s, re.UNICODE)]
     norms = [_norm_match_v2(w) for w, _, _ in toks]
     return toks, norms
+
+
+def _province_aliases_from_admin_v2(admin_names):
+    aliases = set()
+    province_abbrs = {
+        "ha noi": ["hn"],
+        "ho chi minh": ["hcm", "tphcm", "tp hcm", "sg", "sai gon"],
+        "hai phong": ["hp"],
+        "da nang": ["dn"],
+        "can tho": ["ct"],
+    }
+    for name in admin_names or []:
+        norm = _norm_match_v2(name)
+        core = _strip_admin_prefix_v2(name)
+        if not norm or not core:
+            continue
+        is_province = (
+            norm.startswith("tinh ")
+            or core in CENTRAL_CITY_CORES_V2
+            or norm in CENTRAL_CITY_CORES_V2
+        )
+        if not is_province:
+            continue
+        for value in (norm, core):
+            if value:
+                aliases.add(value)
+                aliases.add(value.replace(" ", ""))
+        for abbr in province_abbrs.get(core, []):
+            aliases.add(abbr)
+            aliases.add(abbr.replace(" ", ""))
+    return aliases
+
+
+def _strip_colon_prefix_before_address_v2(seg):
+    if not re.search(r"[:：]", seg or ""):
+        return seg, "", ""
+    left, right = re.split(r"[:：]", seg, maxsplit=1)
+    left = _clean_spaces_v2(left)
+    right = _clean_spaces_v2(right)
+    if not left or not right:
+        return seg, "", ""
+    if _address_signal_start_v2(left) is not None or _find_poi_keyword_v2(left):
+        return seg, "", ""
+    if _address_signal_start_v2(right) is None:
+        return seg, "", ""
+    reason = "COLON_PREFIX_REMOVED"
+    if _has_product_note_signal_v2(left):
+        reason = "PRODUCT_NOTE_REMOVED"
+    elif is_customer_name(left):
+        reason = "LEADING_PERSON_REMOVED"
+    elif _is_note_segment_v2(left):
+        reason = "LEADING_NOTE_REMOVED"
+    return right, _pretty_piece_v2(left), reason
+
+
+def _trim_after_province_v2(text, province_aliases):
+    if not text or not province_aliases:
+        return text, ""
+    toks, norms = _word_spans_v2(text)
+    if not toks:
+        return text, ""
+    best_end = None
+    max_len = min(5, len(toks))
+    for i in range(len(toks)):
+        for L in range(max_len, 0, -1):
+            if i + L > len(toks):
+                continue
+            phrase = " ".join(norms[i:i + L])
+            compact = phrase.replace(" ", "")
+            if phrase in province_aliases or compact in province_aliases:
+                best_end = toks[i + L - 1][2]
+                break
+    if best_end is None:
+        return text, ""
+    tail = text[best_end:].strip(" ,.-–/:;")
+    if not tail:
+        return text, ""
+    if _address_signal_start_v2(tail) is not None:
+        return text, ""
+    return text[:best_end].strip(" ,.-–/:;"), tail
+
+
+def _address_signal_start_v2(seg):
+    starts = []
+    m = re.search(
+        r"\b(?:số\s*nhà|so\s*nha|số|so|sn|nhà|nha)\s*\d",
+        seg or "",
+        flags=re.I,
+    )
+    if m:
+        starts.append(m.start())
+    street_match = _first_street_keyword_match_v2(seg)
+    if street_match:
+        starts.append(street_match[0])
+    found_poi = _find_poi_keyword_v2(seg)
+    toks, norms = _word_spans_v2(seg)
+    if found_poi and toks:
+        starts.append(toks[found_poi[0]][1])
+    for i, _n in enumerate(norms):
+        unit_info = _level4_unit_at_v2(norms, i)
+        if unit_info:
+            starts.append(toks[i][1])
+            break
+    return min(starts) if starts else None
+
+
+def _looks_like_leading_noise_v2(prefix):
+    prefix = _clean_spaces_v2(prefix)
+    n = _norm_match_v2(prefix)
+    if not n:
+        return False
+    if _is_note_segment_v2(prefix):
+        return True
+    if _find_poi_keyword_v2(prefix):
+        return False
+    if _has_product_note_signal_v2(prefix):
+        return True
+    if re.search(r"\b(?:minh|mình)?\s*(?:lay|lấy)\b", prefix, flags=re.I):
+        return True
+    if re.fullmatch(
+        r"(?:me|mẹ|chi|chị|anh|em|co|cô|chu|chú|ba|bà|bo|bố)\s+"
+        r"[a-zà-ỹđ]+(?:\s+[a-zà-ỹđ]+){0,2}\s+mat",
+        n,
+    ):
+        return True
+    if is_customer_name(prefix):
+        return True
+    words = n.split()
+    if (
+        2 <= len(words) <= 4
+        and words[0] in {"me", "chi", "anh", "em", "co", "chu", "ba", "bo"}
+        and not any(w in {"cuc", "nhanh", "phong", "khoa", "tram", "truong", "cong", "ty"} for w in words)
+    ):
+        return True
+    return False
+
+
+def _strip_note_prefix_before_address_v2(seg):
+    seg = _clean_spaces_v2(seg)
+    if not seg:
+        return "", "", ""
+    start = _address_signal_start_v2(seg)
+    if not start or start <= 0:
+        return seg, "", ""
+    prefix = seg[:start].strip(" ,.-–/:")
+    rest = seg[start:].strip(" ,.-–/:")
+    if not prefix or not rest:
+        return seg, "", ""
+    if not _looks_like_leading_noise_v2(prefix):
+        return seg, "", ""
+    reason = "LEADING_NOTE_REMOVED"
+    if is_customer_name(prefix):
+        reason = "LEADING_PERSON_REMOVED"
+    elif _has_product_note_signal_v2(prefix):
+        reason = "PRODUCT_NOTE_REMOVED"
+    return rest, _pretty_piece_v2(prefix), reason
 
 
 def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
@@ -2228,6 +2431,15 @@ def _extract_level4s_v2(text, admin_aliases=None):
         if unit_key == "lang" and raws[i] != "làng":
             i += 1
             continue
+        if unit_key == "khoi" and raws[i] not in {"khối", "khoi"}:
+            i += 1
+            continue
+        if unit_key == "doi" and raws[i] not in {"đội", "doi"}:
+            i += 1
+            continue
+        if unit_key == "khom" and raws[i] not in {"khóm", "khom"}:
+            i += 1
+            continue
         if unit_key == "buon" and " ".join(norms[i:i + 3]) in {"buon me thuot", "buon ma thuot"}:
             i += 1
             continue
@@ -2402,10 +2614,32 @@ def _detail_after_explicit_house_marker_v2(seg):
         re.I,
     )
     for match in reversed(list(pattern.finditer(seg or ""))):
+        prefix = _norm_match_v2((seg or "")[:match.start()])
+        if re.search(r"(?:^| )(?:duong|pho)$", prefix):
+            continue
         detail = _clean_spaces_v2(match.group("detail"))
         if detail:
             return detail
     return ""
+
+
+def _cleanup_street_detail_v2(detail):
+    detail = _clean_spaces_v2(detail)
+    detail = re.sub(r"\s*[.;]\s*[A-Za-z]\d+\s*[:：].*$", " ", detail, flags=re.I)
+    detail = re.sub(r"\s+[.;]?\s*(?:thu|thu hộ|thu ho|cod)\s*[:：\-]?\s*\d+[.,]?\d*\s*k?.*$", " ", detail, flags=re.I)
+    toks, norms = _word_spans_v2(detail)
+    if not toks:
+        return _clean_spaces_v2(detail)
+    raws = [unicodedata.normalize("NFC", w.lower()).strip(" ,.-–/:") for w, _, _ in toks]
+
+    if norms[0] in {"duong", "pho"}:
+        for i in range(2, len(norms)):
+            if norms[i] in {"duong", "pho"} and raws[i] in {"đường", "duong", "phố", "pho"}:
+                detail = detail[:toks[i][1]]
+                break
+
+    detail = re.sub(r"^((?:đường|duong)\s+\S*\d\S*)\s+(?:chợ|cho)\s*$", r"\1", detail, flags=re.I)
+    return _clean_spaces_v2(detail)
 
 
 def _cut_detail_tail_v2(text, admin_aliases):
@@ -2433,6 +2667,9 @@ def _cut_detail_tail_v2(text, admin_aliases):
                 or (unit_info[0] == "lang" and raws[i] != "làng")
                 or (unit_info[0] == "buon" and " ".join(norms[i:i + 3]) in {"buon me thuot", "buon ma thuot"})
                 or (unit_info[0] == "to" and raws[i] not in {"tổ", "to"})
+                or (unit_info[0] == "khoi" and raws[i] not in {"khối", "khoi"})
+                or (unit_info[0] == "doi" and raws[i] not in {"đội", "doi"})
+                or (unit_info[0] == "khom" and raws[i] not in {"khóm", "khom"})
             )
         )
         if unit_info and not invalid_level4_word:
@@ -2495,6 +2732,14 @@ def _cut_detail_tail_v2(text, admin_aliases):
         text,
         flags=re.I,
     )
+    if not re.match(r"^\s*(?:đường|duong|phố|pho)\s+(?:số|so)\b", text, flags=re.I):
+        text = re.sub(
+            r"\s+\b(?:số|so|sn)\s*"
+            r"\d+[A-Za-zĐđ]?(?:\s*[/\-\.]\s*\d+[A-Za-zĐđ]?)*\s*$",
+            " ",
+            text,
+            flags=re.I,
+        )
     return _clean_spaces_v2(text)
 
 
@@ -2533,6 +2778,28 @@ def _strip_leading_house_before_street_v2(detail):
     return detail.strip(" ,.-–/:")
 
 
+def _strip_leading_house_number_from_unprefixed_street_v2(detail):
+    detail = _clean_spaces_v2(detail)
+    m = re.match(
+        r"^\s*\d+[A-Za-zĐđ]?(?:\s*[/\-\.]\s*\d+[A-Za-zĐđ]?)*\s+(?P<rest>.+)$",
+        detail,
+        flags=re.I,
+    )
+    if not m:
+        return detail
+    rest = m.group("rest").strip(" ,.-–/:")
+    rest_norm = _norm_match_v2(rest)
+    if not rest_norm:
+        return detail
+    if re.match(r"^thang\s+\d{1,2}\b", rest_norm):
+        return detail
+    if rest_norm.split()[0] in {"duong", "pho", "ngo", "ngach", "hem", "kiet"}:
+        return detail
+    if len(rest_norm.split()) > 6:
+        return detail
+    return rest
+
+
 def _is_alley_only_v2(detail):
     raw = strip_diacritics(unicodedata.normalize("NFC", str(detail or "")).lower())
     house_token = r"(?:[a-z]{0,4}\d+[a-z0-9]*|\d+[a-z]+[0-9]*|[a-z]+\d+[a-z0-9]*)"
@@ -2557,6 +2824,16 @@ def _looks_like_street_v2(detail):
     n = _norm_match_v2(detail)
     if not n:
         return False
+    if n in {"puong", "pường"}:
+        return False
+    if n in {"nha", "so nha"} or n.startswith(("nha ", "so nha ")):
+        return False
+    if re.fullmatch(r"so \d+[a-z]?", n):
+        return False
+    if n.startswith(("tang ", "lau ", "phong ", "can ho ", "can ", "block ")):
+        return False
+    if n.startswith(("sua ", "nghe ", "nghe nano", "nano ")):
+        return False
     if _is_alley_only_v2(detail):
         return False
     if re.fullmatch(r"(ql|tl|hl|dt)\s*\d+[a-z]?", n):
@@ -2566,6 +2843,8 @@ def _looks_like_street_v2(detail):
     if re.fullmatch(r"(?:\d+[a-z]?|[a-z])", n):
         return False
     if n.startswith(("khu do thi", "khu cong nghiep", "khu che xuat", "khu dan cu")):
+        return False
+    if n.startswith(("cho ", "khu pho ", "thon ", "xom ", "ap ", "ban ", "khu tap the ")):
         return False
     toks, norms = _word_spans_v2(detail)
     raws = [unicodedata.normalize("NFC", w.lower()).strip(" ,.-–/:") for w, _, _ in toks]
@@ -2632,6 +2911,8 @@ def _extract_streets_v2(segments, admin_aliases):
             continue
         detail = _strip_alley_noise_v2(detail)
         detail = _strip_leading_house_before_street_v2(detail)
+        detail = _strip_leading_house_number_from_unprefixed_street_v2(detail)
+        detail = _cleanup_street_detail_v2(detail)
         if not _looks_like_street_v2(detail):
             continue
         pretty = _pretty_street_v2(detail)
@@ -2846,14 +3127,30 @@ def parse_address_components(raw, admin_names=None, debug=False):
 
     admin_aliases = _build_admin_aliases_v2(admin_names or [])
     admin_tail_aliases = _build_admin_tail_aliases_v2(admin_names or [])
+    province_aliases = _province_aliases_from_admin_v2(admin_names or [])
+    text, province_tail = _trim_after_province_v2(text, province_aliases)
+    if province_tail:
+        removed_parts.append(_pretty_piece_v2(province_tail))
+        flags.append("TRAILING_AFTER_PROVINCE_REMOVED")
     segments = _split_segments_v2(text)
     kept_segments = []
     for seg in segments:
+        cleaned_seg, removed_prefix, reason = _strip_colon_prefix_before_address_v2(seg)
+        if removed_prefix:
+            removed_parts.append(removed_prefix)
+            flags.append(reason)
+            seg = cleaned_seg
+        cleaned_seg, removed_prefix, reason = _strip_note_prefix_before_address_v2(seg)
+        if removed_prefix:
+            removed_parts.append(removed_prefix)
+            flags.append(reason)
+            seg = cleaned_seg
         if _is_note_segment_v2(seg):
             removed_parts.append(_pretty_piece_v2(seg))
             flags.append("NOTE_AFTER_ADDRESS_REMOVED")
             continue
-        kept_segments.append(seg)
+        if seg:
+            kept_segments.append(seg)
     segments = kept_segments
     parse_text = ", ".join(segments)
 

@@ -97,12 +97,17 @@ class AddressCleaner:
         output_path: str | os.PathLike[str],
         *,
         include_empty_rows: bool = False,
+        split_components: bool = True,
         sheet_name: str | None = None,
     ) -> CleanStats:
         workbook = openpyxl.load_workbook(input_path, data_only=True)
         source = workbook[sheet_name] if sheet_name else workbook.active
         rows = list(source.iter_rows(values_only=True))
-        output, stats = self.clean_rows_to_workbook(rows, include_empty_rows=include_empty_rows)
+        output, stats = self.clean_rows_to_workbook(
+            rows,
+            include_empty_rows=include_empty_rows,
+            split_components=split_components,
+        )
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         output.save(output_path)
         return stats
@@ -112,12 +117,17 @@ class AddressCleaner:
         workbook_bytes: bytes,
         *,
         include_empty_rows: bool = False,
+        split_components: bool = True,
         sheet_name: str | None = None,
     ) -> tuple[bytes, CleanStats]:
         workbook = openpyxl.load_workbook(io.BytesIO(workbook_bytes), data_only=True)
         source = workbook[sheet_name] if sheet_name else workbook.active
         rows = list(source.iter_rows(values_only=True))
-        output, stats = self.clean_rows_to_workbook(rows, include_empty_rows=include_empty_rows)
+        output, stats = self.clean_rows_to_workbook(
+            rows,
+            include_empty_rows=include_empty_rows,
+            split_components=split_components,
+        )
         buffer = io.BytesIO()
         output.save(buffer)
         return buffer.getvalue(), stats
@@ -127,6 +137,7 @@ class AddressCleaner:
         rows: list[tuple[Any, ...]],
         *,
         include_empty_rows: bool = False,
+        split_components: bool = True,
     ) -> tuple[openpyxl.Workbook, CleanStats]:
         output = openpyxl.Workbook()
         sheet = output.active
@@ -152,10 +163,12 @@ class AddressCleaner:
                 stats.removed += 1
                 continue
 
-            sheet.append(result.as_output_row())
-            stats.output_n += 1
+            output_rows = result.as_component_rows() if split_components else [result.as_output_row()]
+            for output_row in output_rows:
+                sheet.append(output_row)
+            stats.output_n += len(output_rows)
             if result.ward and result.district and result.province:
-                stats.full_admin += 1
+                stats.full_admin += len(output_rows)
 
         self._autosize_output(sheet)
         return output, stats
@@ -185,6 +198,7 @@ def clean_excel(
     output_path: str | os.PathLike[str],
     *,
     include_empty_rows: bool = False,
+    split_components: bool = True,
     sheet_name: str | None = None,
     data_path: str | os.PathLike[str] | None = None,
 ) -> CleanStats:
@@ -192,6 +206,7 @@ def clean_excel(
         input_path,
         output_path,
         include_empty_rows=include_empty_rows,
+        split_components=split_components,
         sheet_name=sheet_name,
     )
 
@@ -200,11 +215,13 @@ def clean_workbook_bytes(
     workbook_bytes: bytes,
     *,
     include_empty_rows: bool = False,
+    split_components: bool = True,
     sheet_name: str | None = None,
     data_path: str | os.PathLike[str] | None = None,
 ) -> tuple[bytes, CleanStats]:
     return AddressCleaner(data_path=data_path).clean_bytes(
         workbook_bytes,
         include_empty_rows=include_empty_rows,
+        split_components=split_components,
         sheet_name=sheet_name,
     )

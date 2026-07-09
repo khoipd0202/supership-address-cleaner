@@ -10,7 +10,16 @@ the cleaner reads an input excel file, parses the raw address fields, and export
 POI | Tên đường | Cấp 4 | Phường/Xã | Quận/Huyện | Tỉnh/TP
 ```
 
-by default, rows without any detail in `POI`, `Tên đường`, or `Cấp 4` are removed. use `--include-empty-rows` if you want to keep them.
+by default, excel output splits components into separate rows. this means a row with one poi, one street, and one level 4 becomes three output rows:
+
+```text
+POI             | Tên đường | Cấp 4 | Phường/Xã | Quận/Huyện | Tỉnh/TP
+Công ty ABC     |           |       | ...
+                | Đường A   |       | ...
+                |           | Thôn 1| ...
+```
+
+rows without any detail in `POI`, `Tên đường`, or `Cấp 4` are removed. use `--include-empty-rows` if you want to keep them.
 
 ## installation
 
@@ -70,6 +79,12 @@ keep rows that have no poi, street, or level 4:
 vn-address-clean input.xlsx -o output.xlsx --include-empty-rows
 ```
 
+keep poi, street, and level 4 together in one row, matching the older output format:
+
+```bash
+vn-address-clean input.xlsx -o output.xlsx --combined-row
+```
+
 ## python usage
 
 clean a full excel file:
@@ -83,6 +98,16 @@ stats = clean_excel(
 )
 
 print(stats.as_dict())
+```
+
+by default, `clean_excel(...)` writes one component per output row. to keep all extracted components in the same row:
+
+```python
+stats = clean_excel(
+    input_path="data/orders.xlsx",
+    output_path="outputs/cleaned_orders.xlsx",
+    split_components=False,
+)
 ```
 
 clean one address:
@@ -113,6 +138,12 @@ expected output:
     "Thành phố Tam Điệp",
     "Tỉnh Ninh Bình",
 ]
+```
+
+for one-address integrations, you can also split that object into database-ready component rows:
+
+```python
+print(result.as_component_rows())
 ```
 
 an address can validly have empty fields. for example, this address has a street but no poi and no level 4:

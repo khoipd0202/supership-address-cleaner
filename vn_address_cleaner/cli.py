@@ -23,6 +23,11 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Keep rows without POI/street/level4 instead of filtering them out.",
     )
+    parser.add_argument(
+        "--combined-row",
+        action="store_true",
+        help="Keep POI/street/level4 in one output row instead of splitting them into separate rows.",
+    )
     parser.add_argument("--sheet-name", help="Worksheet name. Defaults to active sheet.")
     args = parser.parse_args(argv)
 
@@ -31,6 +36,7 @@ def main(argv: list[str] | None = None) -> int:
         args.input,
         output,
         include_empty_rows=args.include_empty_rows,
+        split_components=not args.combined_row,
         sheet_name=args.sheet_name,
     )
     print(f"Input rows:  {stats.input_n}")
