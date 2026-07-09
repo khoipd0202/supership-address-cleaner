@@ -1765,7 +1765,7 @@ def _pretty_piece_v2(s):
     s = re.sub(r"\bCông\s*Tỷ\b", "Công Ty", s, flags=re.I)
     s = _titlecase_vn(s)
     fixes = [
-        (r"\bUbnd\b", "UBND"), (r"\bThcs\b", "THCS"),
+        (r"\bUbnd\b", "UBND"), (r"\bThcs\b", "THCS"), (r"\bthcs\b", "THCS"),
         (r"\bThpt\b", "THPT"), (r"\bTnhh\b", "TNHH"),
         (r"\bBhxh\b", "BHXH"), (r"\bKcn\b", "KCN"),
         (r"\bKcx\b", "KCX"), (r"\bKdc\b", "KDC"),
@@ -1775,6 +1775,7 @@ def _pretty_piece_v2(s):
         (r"\bBv\b", "Bệnh viện"), (r"\bCty\b", "Công ty"),
         (r"\bToà\b", "Tòa"), (r"\bVpbank\b", "VPBank"),
         (r"\bCntt\b", "CNTT"), (r"\bTt\b", "TT"),
+        (r"\bPtdtbt\b", "PTDTBT"),
     ]
     for pat, repl in fixes:
         s = re.sub(pat, repl, s)
@@ -1788,6 +1789,8 @@ def _pretty_piece_v2(s):
         (r"\bTrung Tâm\b", "Trung tâm"), (r"\bNhà Văn Hóa\b", "Nhà văn hóa"),
         (r"\bKhu Công Nghiệp\b", "Khu công nghiệp"),
         (r"\bCụm Công Nghiệp\b", "Cụm công nghiệp"),
+        (r"\bPTDTBT\s+Th\b", "PTDTBT TH"),
+        (r"\bTh-THCS\b", "TH-THCS"),
     ]
     for pat, repl in phrase_fixes:
         s = re.sub(pat, repl, s)
@@ -1819,8 +1822,15 @@ def _normalize_abbrev_v2(s):
     s = re.sub(r"\bkhu\s*dc\b", "Khu Dân Cư", s, flags=re.I)
     s = re.sub(r"\b([pxqh])\.?\s*(\d{1,2})([qxph]\d{1,2})(?=\b)", r"\1\2 \3", s, flags=re.I)
     s = re.sub(r"([A-Za-zÀ-ỹĐđ]{2,})([qpxh]\d{1,2})(?=\b)", r"\1 \2", s, flags=re.I)
-    s = re.sub(r"\b(\d+)([A-Za-zÀ-ỹĐđ]{2,})(?=\s|$)", r"\1 \2", s)
     s = re.sub(r"\b(số|so|sn|nhà|nha)(?=\d)", r"\1 ", s, flags=re.I)
+    address_units = (
+        r"đường|duong|phố|pho|ngõ|ngo|ngách|ngach|hẻm|hem|kiệt|kiet|"
+        r"thôn|thon|xóm|xom|ấp|ap|tổ|to|khu|khối|khoi|đội|doi|"
+        r"bản|ban|buôn|buon|khóm|khom"
+    )
+    s = re.sub(r"(?<=\d)(?=(?:" + address_units + r")(?=\d|\b))", " ", s, flags=re.I)
+    s = re.sub(r"\b(" + address_units + r")(?=\d)", r"\1 ", s, flags=re.I)
+    s = re.sub(r"\b(\d+)([A-Za-zÀ-ỹĐđ]{2,})(?=\s|$)", r"\1 \2", s)
     s = re.sub(r"\b[đd]\s*[\.,/]\s*c\b", "Địa chỉ", s, flags=re.I)
     s = re.sub(r"\bng\.\s*", "Ngõ ", s, flags=re.I)
     s = re.sub(r"\b[đd]\.(?!\s*c)\s*", "Đường ", s, flags=re.I)
@@ -2074,6 +2084,7 @@ def _is_note_segment_v2(seg):
 def _split_segments_v2(s):
     s = re.sub(r"[()]+", ",", s)
     s = re.sub(r"(?<=\d)\s*[-–—]\s*(?=\d)", " __ADDR_RANGE_DASH__ ", s)
+    s = re.sub(r"\b(th)\s*[-–—]\s*(thcs)\b", r"\1 __ADDR_RANGE_DASH__ \2", s, flags=re.I)
     s = re.sub(r"\s*[-–—|;]\s*", ",", s)
     s = s.replace(" __ADDR_RANGE_DASH__ ", "-")
     return [p.strip(" ,.-:/") for p in re.split(r"[,;\n\r\t|]+", s) if p.strip(" ,.-:/")]
@@ -2747,9 +2758,11 @@ def _strip_leading_address_junk_v2(seg):
 
 
 def _detail_after_explicit_house_marker_v2(seg):
+    house_part = r"[A-Za-zĐđ]?\d+(?:[A-Za-zĐđ](?=\s|[,.;:\-–/]|$))?"
     house_number = (
-        r"\d+[A-Za-zĐđ]?(?:\s*[/\-\.]\s*[A-Za-zĐđ]?\d+[A-Za-zĐđ]?)*"
-        r"(?:[A-Za-zĐđ](?=\s|[,.\-–/]|$)|\s+[A-Za-zĐđ](?=\s|[,.\-–/]|$))?"
+        house_part
+        + r"(?:\s*[/\-\.]\s*" + house_part + r")*"
+        + r"(?:\s+[A-Za-zĐđ](?=\s|[,.;:\-–/]|$))?"
     )
     pattern = re.compile(
         r"\b(?:số\s*nhà|so\s*nha|số|so|sn|nhà|nha)\s*"
@@ -2993,6 +3006,11 @@ def _looks_like_street_v2(detail):
         return False
     if _is_alley_only_v2(detail):
         return False
+    words = n.split()
+    if words and words[0] == "dg":
+        return False
+    if "km" in words:
+        return False
     if re.fullmatch(r"(ql|tl|hl|dt)\s*\d+[a-z]?", n):
         return True
     if re.fullmatch(r"[a-z]{1,4}\d+[a-z0-9]*", n):
@@ -3015,7 +3033,6 @@ def _looks_like_street_v2(detail):
         "thanh pho", "thi xa", "thi tran",
     )):
         return False
-    words = n.split()
     starts_with_street_keyword = bool(words and words[0] in {"duong", "pho"})
     if _find_poi_keyword_v2(detail) and not starts_with_street_keyword:
         return False
@@ -3034,7 +3051,8 @@ def _extract_streets_v2(segments, admin_aliases):
     patterns = [
         re.compile(r"^\s*" + house_prefix + r"\s+(?P<detail>.+)$", re.I),
         re.compile(r"\b(?:số\s*nhà|so\s*nha|số|so|sn|nhà|nha)\s*"
-                   r"(?:\d+[A-Za-zĐđ]?(?:\s*[/\-]\s*[A-Za-zĐđ]?\d+[A-Za-zĐđ]?)*)"
+                   r"(?:[A-Za-zĐđ]?\d+(?:[A-Za-zĐđ](?=\s|[,.;:\-–/]|$))?"
+                   r"(?:\s*[/\-]\s*[A-Za-zĐđ]?\d+(?:[A-Za-zĐđ](?=\s|[,.;:\-–/]|$))?)*)"
                    r"\s+(?P<detail>.+)$", re.I),
     ]
     for idx, seg in enumerate(segments):
