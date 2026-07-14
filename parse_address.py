@@ -613,7 +613,10 @@ class Parser:
                 if len(alias) < min_len:
                     continue
                 wc = alias.count(" ") + 1
-                cutoff = 1 if len(alias) < 8 else max_cutoff
+                # Alias 6-7 ký tự vẫn có thể chứa một lỗi chèn + một lỗi gõ
+                # ("đômgs đa" -> "đống đa"). Khi caller cho phép cutoff=2,
+                # giữ mức 1 chỉ cho tên rất ngắn để tránh false positive.
+                cutoff = 1 if len(alias) < 6 else max_cutoff
                 for i in range(len(toks) - wc + 1):
                     prev = toks[i - 1] if i > 0 else ""
                     prev2 = toks[i - 2] if i > 1 else ""
@@ -707,7 +710,7 @@ class Parser:
                 before=ppos, exclude=spans)
             if dist is None:
                 f = self._fuzzy(t, self.districts_by_prov.get(prov.uid, []),
-                                before=ppos, exclude=spans)
+                                before=ppos, exclude=spans, max_cutoff=2)
                 if f:
                     dist, dpos, dln = f
                     res["note"].append("quận/huyện khớp gần đúng")
@@ -761,15 +764,78 @@ class Parser:
                         if dist is None:
                             dist = self.districts[u0.parent]
                             res["note"].append("suy ra quận/huyện từ phường/xã")
+        # Một tên tỉnh yếu có thể vô tình nằm trong tên đường + tên phường:
+        # "Lê Thị Hoa Bình Chiểu Thủ Đức" bị bắt "Hòa Bình". Nếu đồng thời
+        # tìm thấy cặp phường đa từ + quận/huyện cha đa từ ở tỉnh khác, cặp
+        # liên kết cha-con là bằng chứng mạnh hơn và được quyền sửa tỉnh yếu.
+        if ward is None and dist is None and prov:
+            linked = []
+            for cand in self._collect(t, self.wards.values(), ward_mode=True):
+                cand_ward, cand_pos, cand_len, _score = cand
+                ward_base = split_prefix(norm_text(cand_ward.name).strip())[1]
+                if " " not in ward_base:
+                    continue
+                cand_dist = self.districts.get(cand_ward.parent)
+                if not cand_dist:
+                    continue
+                dist_base = split_prefix(norm_text(cand_dist.name).strip())[1]
+                if " " not in dist_base:
+                    continue
+                dist_hits = self._collect(t, [cand_dist])
+                if not dist_hits:
+                    continue
+                du, dp, dl, ds = max(dist_hits, key=lambda x: (x[3], x[1]))
+                if dp <= cand_pos:
+                    continue
+                linked.append((cand_ward, cand_pos, cand_len, du, dp, dl))
+            parents = {(x[0].uid, x[3].uid) for x in linked}
+            if len(parents) == 1:
+                ward, wpos, wln, dist, dpos, dln = linked[0]
+                # Bỏ span tỉnh nhận nhầm để DetailExtractor giữ lại "Hoa".
+                spans = [span for span in spans if span != (ppos, pln)]
+                adm_spans = [span for span in adm_spans if span != (ppos, pln)]
+                prov = self.provinces[dist.parent]
+                ppos, pln = -1, 0
+                spans.extend([(wpos, wln), (dpos, dln)])
+                adm_spans.extend([(wpos, wln), (dpos, dln)])
+                res["note"].append("sửa tỉnh từ cặp phường-quận liên kết")
         if prov is None:
-            hits = [c for c in self._collect(t, self.wards.values())
-                    if c[3] >= 2 and c[2] >= 8]
+            hits = []
+            for c in self._collect(t, self.wards.values()):
+                base = split_prefix(norm_text(c[0].name).strip())[1]
+                strong = c[3] >= 2 and c[2] >= 8
+                token_idx = next(
+                    (idx for idx, off in enumerate(offs) if off == c[1]),
+                    -1,
+                )
+                preceded_by_street = bool(
+                    token_idx >= 0
+                    and any(
+                        w in {"duong", "pho", "de", "ql", "tl", "hl", "dt"}
+                        for w in norms[max(0, token_idx - 3):token_idx]
+                    )
+                )
+                # Tên phường/xã đa từ, duy nhất và nằm cuối địa chỉ cũng đủ
+                # mạnh dù raw không ghi tiền tố/tỉnh ("... Dương Nội").
+                tail_multiword = (
+                    c[3] == 1 and " " in base and c[2] >= 7
+                    and c[1] >= len(t) * 0.55
+                    and not preceded_by_street
+                )
+                if strong or tail_multiword:
+                    hits.append(c)
             if hits:
                 hits.sort(key=lambda c: (c[3], c[2], c[1]), reverse=True)
                 u0, p0, l0, _ = hits[0]
                 same = [h for h in hits
                         if norm_text(h[0].name) == norm_text(u0.name)]
-                dup = [h for h in hits if h not in same and h[2] == l0]
+                # Chỉ coi là mơ hồ khi các tên khác khớp đúng cùng span.
+                # "Tân Dương" xuất hiện sớm hơn không được chặn "Dương Nội"
+                # ở cuối địa chỉ chỉ vì hai cụm có cùng độ dài.
+                dup = [
+                    h for h in hits
+                    if h not in same and h[1] == p0 and h[2] == l0
+                ]
                 dists = {h[0].parent for h in same}
                 if not dup and len(dists) == 1:
                     ward, wpos, wln = u0, p0, l0

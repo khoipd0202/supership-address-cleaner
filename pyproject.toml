@@ -11,6 +11,12 @@ dependencies = [
     "openpyxl>=3.1",
 ]
 
+[project.optional-dependencies]
+llm = [
+    "certifi>=2024.0",
+    "python-dotenv>=1.0",
+]
+
 [project.scripts]
 vn-address-clean = "vn_address_cleaner.cli:main"
 

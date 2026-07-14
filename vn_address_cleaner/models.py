@@ -54,6 +54,8 @@ class CleanStats:
     removed: int = 0
     full_admin: int = 0
     mapped_new: int = 0
+    duplicates: int = 0
+    review_n: int = 0
 
     def as_dict(self) -> dict[str, int]:
         return {
@@ -62,4 +64,6 @@ class CleanStats:
             "removed": self.removed,
             "full_admin": self.full_admin,
             "mapped_new": self.mapped_new,
+            "duplicates": self.duplicates,
+            "review_n": self.review_n,
         }

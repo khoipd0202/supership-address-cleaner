@@ -30,6 +30,12 @@ cd /Users/dangkhoii/convert_adderss
 python3 -m pip install -e .
 ```
 
+with Cerebras support for ambiguous rows:
+
+```bash
+python3 -m pip install -e ".[llm]"
+```
+
 or, after cloning the private repository:
 
 ```bash
@@ -85,6 +91,17 @@ keep poi, street, and level 4 together in one row, matching the older output for
 vn-address-clean input.xlsx -o output.xlsx --combined-row
 ```
 
+enable Cerebras for strict ambiguous-row parsing:
+
+```bash
+export CEREBRAS_API_KEY="your_api_key_here"
+export CEREBRAS_BATCH_SIZE=5
+export CEREBRAS_MAX_ROWS_PER_RUN=30
+vn-address-clean input.xlsx -o output.xlsx --cerebras
+```
+
+Cerebras is only called for semantic ambiguity that rules cannot decide, such as missed POI/level-4 keywords, multiple POI/level-4 candidates, or unclear POI/street/admin boundaries. Low confidence, missing POI, missing level 4, old/new admin wording, and raw admin conflicts are handled by rule flags or manual-review flags without calling Cerebras by default. The LLM result is accepted only when each returned component has an evidence span in the original raw address. `Phường/Xã`, `Quận/Huyện`, and `Tỉnh/TP` always come from the source columns, never from the LLM. Free-tier defaults are intentionally conservative: 5 rows per request and 30 unique LLM rows per run.
+
 ## python usage
 
 clean a full excel file:
@@ -107,6 +124,16 @@ stats = clean_excel(
     input_path="data/orders.xlsx",
     output_path="outputs/cleaned_orders.xlsx",
     split_components=False,
+)
+```
+
+use Cerebras from Python:
+
+```python
+stats = clean_excel(
+    input_path="data/orders.xlsx",
+    output_path="outputs/cleaned_orders.xlsx",
+    use_cerebras=True,
 )
 ```
 
@@ -224,6 +251,13 @@ then open:
 ```text
 http://127.0.0.1:8899
 ```
+
+when multiple workbooks are uploaded together, the ui downloads one consolidated
+`cleaned_address_files.xlsx` workbook. each output sheet includes a `Tên file nguồn`
+column so rows from different uploads remain distinguishable.
+
+downloaded address sheets are grouped automatically by `Tỉnh/TP → Quận/Huyện →
+Phường/Xã`; rows missing administrative fields are placed at the end for review.
 
 ## privacy
 
