@@ -17,14 +17,18 @@ try:
     from clean_address import (
         _ensure_level4_prefix,
         _ensure_street_prefix,
+        _normalize_abbrev_v2,
         _pretty_piece_v2,
         _pretty_street_v2,
+        _trim_poi_value_v2,
     )
 except ImportError:
     _ensure_level4_prefix = None
     _ensure_street_prefix = None
+    _normalize_abbrev_v2 = None
     _pretty_piece_v2 = None
     _pretty_street_v2 = None
+    _trim_poi_value_v2 = None
 
 _DOTENV_LOADED = False
 CEREBRAS_API_URL = "https://api.cerebras.ai/v1/chat/completions"
@@ -1136,6 +1140,14 @@ def validate_llm_result(result: dict[str, Any], original_row: dict[str, Any]) ->
 
     for field in ("poi", "house_number", "street", "level4"):
         result[field] = _clean_optional_text(result.get(field))
+    if result.get("poi") and _trim_poi_value_v2:
+        poi_candidate = result["poi"]
+        if _normalize_abbrev_v2:
+            poi_candidate = _normalize_abbrev_v2(poi_candidate)
+        trimmed_poi = _trim_poi_value_v2(poi_candidate, set(), set())
+        if trimmed_poi and _norm(trimmed_poi) != _norm(result["poi"]):
+            result["poi"] = trimmed_poi
+            flags.append("LLM_POI_ADDRESS_TAIL_TRIMMED")
     if result.get("street"):
         result["street"] = _trim_row_admin_tail(result["street"], original_row)
 

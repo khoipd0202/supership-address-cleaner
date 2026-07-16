@@ -242,6 +242,156 @@ class StreetRegressionTests(unittest.TestCase):
                 self.assertEqual(result.street, street)
                 self.assertEqual(result.level4, level4)
 
+    def test_poi_stops_before_house_street_and_local_address(self):
+        cases = [
+            (
+                "Nguyễn thị diệu thúy, tổng công ty cổ phần đầu tư phát triển xây dựng. 15 thi sách, phường thắng tam, TP Vũng Tàu. 0845924884",
+                "Tổng Công ty Cổ Phần Đầu Tư Phát Triển Xây Dựng",
+            ),
+            (
+                "Trường mn tam quan bắc. Tân thành 1. Tam quan bắc. Hoài nhơn. Bình định",
+                "Trường Mầm non Tam Quan Bắc",
+            ),
+            (
+                "Đoàn thị oanh.shop dép lan hạnh.233/55 tổ 3 khu 8 lê hồng phong thủ Dầu một Bình Dương.0918926608",
+                "Shop Dép Lan Hạnh",
+            ),
+            (
+                "Trường Thcs Nguyễn Văn TrỗiKhu Phố 1B,an Phú,thuận An,bình Dương",
+                "Trường THCS Nguyễn Văn Trỗi",
+            ),
+            ("198 Nguyễn Trãi, Trạm Y Tế P9. Khóm 2", "Trạm y tế P9"),
+            (
+                "Trường Mn Hoa Sen Trung Tâm Huyện Buôn Đôn Tỉnh Đăk Lăk",
+                "Trường Mầm non Hoa Sen",
+            ),
+            (
+                "Trung tâm Bảo trì xe máy Quang Thành. Ngã ba Nguyễn Văn cừ- Hùng Vương,-Phước An -Nhơn trạch -Đồng nai",
+                "Trung tâm Bảo Trì Xe Máy Quang Thành",
+            ),
+            (
+                "Cho Chị Về Đc Nhà Nghỉ Hồng Phúc 2. Sông Mây Bắc Sơn Huyện Trảng Bom Đồng Nai",
+                "Nhà Nghỉ Hồng Phúc 2",
+            ),
+            (
+                "Trung Tâm Chăm Sóc Mẹ Và Bé Khánh Trần K 2 Pha Đường Nguyễn Văn Cừ, Phường Lê Hồng Phong, Thành Phố Phủ Lý, Tỉnh Hà Nam",
+                "Trung tâm Chăm Sóc Mẹ Và Bé Khánh Trần",
+            ),
+            ("Trường Mầm non Quốc Tế Nguyễn Du.09 Lê Văn Thiêm", "Trường Mầm non Quốc Tế Nguyễn Du"),
+            ("Sửa xe Tuấn Cường 1A Mê Linh p9 Dalat Lâm Đồng", "Sửa Xe Tuấn Cường"),
+            ("trường mầm non hùng vương tx pt tỉnh pt", "Trường Mầm non Hùng Vương"),
+            (
+                "512- Khu đô thị waterfront 2-Võ Nguyên Giáp- Lê Chân- Hải Phòng",
+                "Khu Đô Thị Waterfront 2",
+            ),
+            ("Nhà Nghĩ Khánh Linh.37 Phan Đình Phùng.hải Hà Quảng Ninh", "Nhà Nghĩ Khánh Linh"),
+            (
+                "Trường đại học công nghệ Sài Gòn180 cao lỗ phường Chánh Hưng TP.hcm",
+                "Trường Đại Học Công Nghệ Sài Gòn",
+            ),
+        ]
+        for raw, expected_poi in cases:
+            with self.subTest(raw=raw):
+                self.assertEqual(self.cleaner.clean(raw).poi, expected_poi)
+
+    def test_llm_poi_cannot_reattach_house_number_or_street(self):
+        raw = "Shop dép Lan Hạnh.233/55 tổ 3 khu 8 Lê Hồng Phong"
+        validated = validate_llm_result(
+            {
+                "poi": "Shop Dép Lan Hạnh.233/55",
+                "house_number": "233/55",
+                "street": "Lê Hồng Phong",
+                "level4": "Tổ 3",
+                "ward": "",
+                "district": "",
+                "province": "",
+                "confidence": 0.95,
+                "flags": [],
+                "evidence": {
+                    "poi_span": "Shop dép Lan Hạnh.233/55",
+                    "house_number_span": "233/55",
+                    "street_span": "Lê Hồng Phong",
+                    "level4_span": "tổ 3",
+                },
+            },
+            {
+                "raw_address": raw,
+                "ward": "",
+                "district": "",
+                "province": "",
+                "flags": [],
+                "rule_candidates": {"poi": "Shop Dép Lan Hạnh"},
+            },
+        )
+        self.assertEqual(validated["poi"], "Shop Dép Lan Hạnh")
+        self.assertIn("LLM_POI_ADDRESS_TAIL_TRIMMED", validated["flags"])
+
+    def test_new_poi_boundaries_preserve_previous_structures(self):
+        cases = [
+            (
+                "Công Ty A.B.C, Số 1 Đường Nguyễn Trãi, Thôn 1, Xã Trà Tập, Quảng Nam",
+                "Công ty A.b.c", "Đường Nguyễn Trãi", "Thôn 1",
+            ),
+            (
+                "Ship Đường D8-5A Đồng Sổ Lai Uyên Bàu Bàng Bình Dương Cũ",
+                "", "Đường D8-5A", "",
+            ),
+            (
+                "20 16B1 Làng Việt Kiều Châu Âu - Mỗ Lao - Hà Đông - HN",
+                "Khu đô thị Làng Việt Kiều Châu Âu", "16B1", "",
+            ),
+            (
+                "Ship Mình Đến Địa Chỉ Ngân Hàng Bản Việt,577, Trần Phú, Cẩm Phả",
+                "Ngân hàng Bản Việt", "Trần Phú", "",
+            ),
+            (
+                "Bv Y Dược Cổ Truyền Đồng Nai, Khu Phố 9, Phường Tân Phong, Biên Hoà, Đồng Nai",
+                "Bệnh viện Y Dược Cổ Truyền Đồng Nai", "", "Khu phố 9",
+            ),
+            (
+                "Bidv Cn Mỹ Đình · Địa Chỉ: Tầng 1,2,3 Khu Tổ Hợp Văn Phòng, Trung Tâm Thương Mại Và Chung Cư Cao Cấp Golden Palace, Mễ Trì, Huyện Nam Từ Liêm, Hà Nội",
+                "BIDV Chi nhánh Mỹ Đình", "", "",
+            ),
+        ]
+        for raw, poi, street, level4 in cases:
+            with self.subTest(raw=raw):
+                result = self.cleaner.clean(raw)
+                self.assertEqual(result.poi, poi)
+                self.assertEqual(result.street, street)
+                self.assertEqual(result.level4, level4)
+
+    def test_reported_poi_street_and_stall_boundaries(self):
+        cases = [
+            (
+                "4400 quốc lộ 91C, khóm An Thịnh thị trấn An Phú, tỉnh An Giang ( công an huyện cũ)",
+                "", "Quốc Lộ 91C", "Khóm An Thịnh",
+            ),
+            (
+                "chợ đầu mối nông sản Châu Đốc sap 474 phường vĩnh mỹ thành phố Châu Đốc",
+                "Chợ Đầu Mối Nông Sản Châu Đốc", "", "Sạp 474",
+            ),
+            ("12/13 lý thái tổ mỹ long long xuyên", "", "Lý Thái Tổ", ""),
+            ("1392 đường 30/4", "", "Đường 30/4", ""),
+            (
+                "Phan Thị Thu Ngân 180/7 Yersin Khu Phố 1, P.hiệp Thành, Tp.thủ Dầu Một, Bình Dương. 1L 450K. 0982545554",
+                "", "Yersin", "Khu phố 1",
+            ),
+            (
+                "Ủy Ban Xã Thôn Chiềng Khạt Xã Đồng Lương Tỉnh Thanh Hóa",
+                "Ủy Ban Xã Đồng Lương", "", "Thôn Chiềng Khạt",
+            ),
+            (
+                "trường tiểu học núi cấm an hảo thị xã tịnh biên an giang",
+                "Trường Tiểu học Núi Cấm", "", "",
+            ),
+        ]
+        for raw, poi, street, level4 in cases:
+            with self.subTest(raw=raw):
+                result = self.cleaner.clean(raw)
+                self.assertEqual(result.poi, poi)
+                self.assertEqual(result.street, street)
+                self.assertEqual(result.level4, level4)
+
 
 if __name__ == "__main__":
     unittest.main()

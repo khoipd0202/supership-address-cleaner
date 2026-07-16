@@ -862,6 +862,15 @@ def normalize_common_abbreviations(s):
     s = re.sub(r"\bkp\.?\s*(\d+[a-zA-Z]?)\b", r"Khu Phố \1", s, flags=re.I)
     s = re.sub(r"\btdp\.?\s*(\d+[a-zA-Z]?)\b", r"Tổ Dân Phố \1", s, flags=re.I)
     s = re.sub(r"\b(khu\s*phố|khu\s*pho)\s*(\d)", r"\1 \2", s, flags=re.I)
+    # Khôi phục ranh giới bị dính chữ: "TrỗiKhu Phố" -> "Trỗi Khu Phố".
+    # Chỉ tách trước keyword địa chỉ rõ để không phá tên riêng CamelCase.
+    s = re.sub(
+        r"(?<=[a-zà-ỹđ])(?=(?:Khu\s*Phố|Khóm|Thôn|Xóm|Ấp|Tổ\s|"
+        r"Phường|Xã|Quận|Huyện|Tỉnh|Đường|Phố)\b)",
+        " ", s,
+    )
+    # Số nhà bị dính ngay sau tên: "Sài Gòn180 Cao Lỗ".
+    s = re.sub(r"(?<=[a-zà-ỹđ])(?=\d{2,}\b)", " ", s)
     s = re.sub(
         r"\b(ấp|ap|thôn|thon|xóm|xom|tổ|to|đội|doi|khóm|khom|bản|ban|buôn|buon)\s*(\d+[a-zA-Z]?)\b",
         r"\1 \2", s, flags=re.I)
@@ -1594,7 +1603,7 @@ STRICT_DROP_DETAIL_FLAGS_V2 = {"RAW_ADMIN_CONFLICT_WITH_COLUMNS", "LOW_CONFIDENC
 # Tiền tố loại đơn vị cấp 4 hợp lệ (dạng đã strip dấu)
 LEVEL4_UNIT_PREFIX_RE_V2 = re.compile(
     r"^(?:thon|xom|ap|khu\s+pho|khu\s+dan\s+cu|khu|kp|to\s+dan\s+pho|tdp|to|"
-    r"khoi|ban|buon|lang|soc|khom|doi|tieu\s+khu|cum\s+dan\s+cu)\b"
+    r"khoi|ban|buon|lang|soc|khom|doi|sap|tieu\s+khu|cum\s+dan\s+cu)\b"
 )
 ADMIN_VERSION_KEYWORD_RE_V2 = re.compile(
     r"\b(?:nay\s+thuoc|nay\s+la|sap\s+nhap|truoc\s+khi\s+sap\s+nhap|"
@@ -1654,6 +1663,8 @@ STREET_START_RE_V2 = re.compile(
 
 KNOWN_UNPREFIXED_STREET_NAMES_V2 = {
     "ngo gia tu",
+    "ly thai to",
+    "yersin",
 }
 
 KNOWN_RESIDENTIAL_POI_MAP_V2 = {
@@ -1697,6 +1708,7 @@ LEVEL4_UNIT_MAP_V2 = {
     "tieu khu": "Tiểu khu",
     "cum dan cu": "Cụm dân cư",
     "khom": "Khóm",
+    "sap": "Sạp",
 }
 
 
@@ -2001,6 +2013,8 @@ def _normalize_abbrev_v2(s):
     s = re.sub(r"\bkp\.?\s*(\d+[a-zA-Z]?)\b", r"Khu Phố \1", s, flags=re.I)
     s = re.sub(r"\bk\.p\.?\s*(\d+[a-zA-Z]?)\b", r"Khu Phố \1", s, flags=re.I)
     s = re.sub(r"\btdp\.?\s*(\d+[a-zA-Z]?)\b", r"Tổ Dân Phố \1", s, flags=re.I)
+    # "sap 474" trong chợ = "Sạp 474", không thuộc tên chợ.
+    s = re.sub(r"\bsap\.?\s*(\d+[a-zA-Z]?)\b", r"Sạp \1", s, flags=re.I)
     # "Tk 9" = Tiểu khu 9 (Sơn La...). [1-9] đầu để tránh số tài khoản/điện thoại.
     s = re.sub(r"\btk\.?\s*([1-9]\d{0,2}[a-zA-Z]?)\b", r"Tiểu Khu \1", s, flags=re.I)
     # "Kim Sơn1" -> "Kim Sơn 1": từ có dấu tiếng Việt dính số luôn là tên + số
@@ -2012,6 +2026,14 @@ def _normalize_abbrev_v2(s):
         r"\b(ấp|ap|thôn|thon|xóm|xom|tổ|to|đội|doi|khóm|khom|khối|khoi|"
         r"bản|ban|buôn|buon|sóc|soc)\s*(\d+[a-zA-Z]?)\b",
         r"\1 \2", s, flags=re.I)
+    # Khôi phục ranh giới bị dính chữ: "TrỗiKhu Phố" -> "Trỗi Khu Phố".
+    s = re.sub(
+        r"(?<=[a-zà-ỹđ])(?=(?:Khu\s*Phố|Khóm|Thôn|Xóm|Ấp|Tổ\s|"
+        r"Phường|Xã|Quận|Huyện|Tỉnh|Đường|Phố)\b)",
+        " ", s,
+    )
+    # Số nhà bị dính ngay sau tên: "Sài Gòn180 Cao Lỗ".
+    s = re.sub(r"(?<=[a-zà-ỹđ])(?=\d{2,}\b)", " ", s)
     return s
 
 
@@ -2244,6 +2266,9 @@ def _is_note_segment_v2(seg):
         return True
     if re.fullmatch(r"(size|sz|mau|kg|cod|thu ho|phi ship|cuoc).*", n):
         return True
+    # "Sửa xe Tuấn Cường" là POI dịch vụ, không phải ghi chú sản phẩm "sữa ...".
+    if n == "sua xe" or n.startswith(("sua xe ", "tiem sua xe ")):
+        return False
     if _has_product_note_signal_v2(seg):
         return True
     return False
@@ -2254,6 +2279,9 @@ def _split_segments_v2(s):
     # Dấu chấm có khoảng trắng hai bên là dấu phân trường địa chỉ, không phải
     # dấu chấm viết tắt: "02 Lê Lai . Hợp Thành".
     s = re.sub(r"\s+\.\s+", ", ", s)
+    # "Waterfront 2-Võ Nguyên Giáp": số cuối tên POI + tên đường là ranh giới.
+    # Không đụng mã D8-5A/B7-02 vì sau gạch của các mã đó bắt đầu bằng số.
+    s = re.sub(r"(?<=\d)[-–—](?=[A-ZÀ-ỸĐ][a-zà-ỹđ])", ",", s)
     # Giữ gạch nối nằm sát trong mã/tên (D8-5A, B04-L35, Miếu-Quốc).
     # Gạch có khoảng trắng hai bên vẫn là dấu phân cách địa chỉ.
     s = re.sub(r"(?<=\w)[-–—](?=\w)", "__ADDR_INNER_DASH__", s)
@@ -2313,6 +2341,10 @@ def _admin_tail_start_in_poi_v2(norms, toks, start_scan, admin_aliases, kw_phras
             continue
         span = k - j
         remaining = len(norms) - k
+        school_has_name_before_admin = (
+            kw_phrase in {"truong", "mam non", "tieu hoc", "thcs", "thpt"}
+            and j - start_scan >= 2
+        )
         if (matched_units >= 2 or span >= 4) and remaining <= 2:
             return toks[j][1]
         if (
@@ -2320,7 +2352,10 @@ def _admin_tail_start_in_poi_v2(norms, toks, start_scan, admin_aliases, kw_phras
             and remaining == 0
             and span >= 2
             and j > start_scan  # phải còn ít nhất 1 từ tên trước đuôi
-            and kw_phrase not in POI_NAMED_AFTER_ADMIN_KWS_V2
+            and (
+                kw_phrase not in POI_NAMED_AFTER_ADMIN_KWS_V2
+                or school_has_name_before_admin
+            )
             and (
                 first_phrase in ward_aliases
                 or first_phrase.replace(" ", "") in ward_aliases
@@ -2335,10 +2370,22 @@ def _trim_poi_value_v2(value, admin_aliases, ward_aliases=None):
     token viết tắt lơ lửng, dấu câu thừa."""
     parts = value.split(".") if "." in value else [value]
     out_parts = []
-    for part in parts:
+    for part_index, part in enumerate(parts):
         part = re.sub(r"\s*[:：]\s*", " ", part).strip(" ,-–—/&:;")
         if not part:
             continue
+        # Sau phần có keyword POI, dấu chấm thường chuyển sang số nhà/đường/
+        # cấp 4. Không nối ngược các phần địa chỉ này trở lại POI. Chỉ cho phép
+        # mảnh viết tắt rất ngắn kiểu "A.B.C" tiếp tục thuộc tên doanh nghiệp.
+        if part_index > 0 and out_parts and not _find_poi_keyword_v2(part):
+            compact_letters = re.sub(r"[^A-Za-zÀ-ỹĐđ]", "", part)
+            if not (
+                compact_letters
+                and len(compact_letters) <= 4
+                and not re.search(r"\d", part)
+                and len(part.split()) == 1
+            ):
+                break
         toks, norms = _word_spans_v2(part)
         kw = _find_poi_keyword_v2(part)
         start_scan = (kw[0] + kw[1] + 1) if kw else 1
@@ -2597,6 +2644,7 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
         raw = raws[i]
         raw_phrase2 = " ".join(raws[i:i + 2])
         nxt = norms[i + 1] if i + 1 < len(norms) else ""
+        nxt2 = norms[i + 2] if i + 2 < len(norms) else ""
         is_known_admin_here = any(
             " ".join(norms[i:i + L]) in admin_aliases
             or " ".join(norms[i:i + L]).replace(" ", "") in admin_aliases
@@ -2607,7 +2655,13 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
             or (raw in {"ngõ", "ngo", "ngách", "ngach", "hẻm", "hem", "kiệt", "kiet"} and bool(re.match(r"^\d", nxt)))
         )
         is_route = phrase2 in {"quoc lo", "tinh lo", "huong lo", "dai lo", "cao toc"}
-        force_admin_tail = is_known_admin_here and raw in {"xã", "xa", "phường", "phuong", "p", "x"}
+        explicit_abbrev_admin_tail = (
+            raw in {"tx", "tp", "tt"}
+            and any(x in {"tinh", "huyen", "quan", "tp", "tx"} for x in norms[i + 1:])
+        )
+        force_admin_tail = (
+            is_known_admin_here and raw in {"xã", "xa", "phường", "phuong", "p", "x"}
+        ) or explicit_abbrev_admin_tail
         protected_tt_abbrev = raw == "tt" and i > 0 and norms[i - 1] == "cntt"
         is_admin_prefix_word = (
             raw in {"xã", "xa", "phường", "phuong", "quận", "quan", "huyện", "huyen", "tỉnh", "tinh", "tp", "tt", "tx", "p", "q", "h", "x", "t"}
@@ -2623,16 +2677,32 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
             and bool(re.match(r"^\d", nxt))
         )
         medical_poi = norms[0] in {"bv"} or " ".join(norms[:2]) in {"benh vien", "phong kham"}
+        house_token = toks[i][0].strip(" ,.-–/:")
+        strong_house_token = bool(
+            re.search(r"[/.-]", house_token)
+            or re.fullmatch(r"\d{2,}[a-z]?", n)
+            or re.fullmatch(r"\d+[a-z]", n)
+        )
         is_house_street_tail = (
-            medical_poi
-            and i >= 2
-            and re.fullmatch(HOUSE_TOKEN_V2, toks[i][0].strip(" ,.-–/:"), flags=re.I)
+            i >= 2
+            and re.fullmatch(HOUSE_TOKEN_V2, house_token, flags=re.I)
+            and (medical_poi or strong_house_token)
             and bool(nxt)
             and nxt not in {"tang", "lau", "phong", "khoa"}
         )
+        force_level4_tail = (
+            i >= 3
+            and (
+                (phrase2 == "khu pho" and bool(re.match(r"^\d", nxt2)))
+                or (
+                    n in {"khom", "thon", "xom", "ap", "to", "tdp", "khoi", "doi"}
+                    and bool(re.match(r"^\d", nxt))
+                )
+            )
+        )
         is_level4 = (
-            i >= 2 and i >= protect_until and
-            raw in {"ấp", "ap", "thôn", "thon", "xóm", "xom", "tổ", "to", "khu", "khối", "khoi", "buôn", "buon", "bản", "ban", "làng", "lang", "đội", "doi", "tdp"}
+            i >= 2 and (i >= protect_until or force_level4_tail) and
+            raw in {"ấp", "ap", "thôn", "thon", "xóm", "xom", "tổ", "to", "khu", "khối", "khoi", "buôn", "buon", "bản", "ban", "làng", "lang", "đội", "doi", "tdp", "sạp", "sap"}
             # KHÔNG cắt "bản/ban" nếu đây là tên thương hiệu đứng sau từ khóa POI
             # (vd "Ngân hàng Bản Việt", "VPBank Hoà Bình")
             and not (raw in {"bản", "ban"} and norms[0] in {
@@ -2646,6 +2716,11 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
                 or " ".join(norms[i:i + L]).replace(" ", "") in admin_tail_aliases
                 for L in range(1, min(5, len(norms) - i) + 1)
             ))
+        )
+        is_location_center = (
+            i >= 3
+            and phrase2 == "trung tam"
+            and nxt2 in {"huyen", "quan", "tinh", "thanh", "thi"}
         )
         is_recipient_tail = (
             i >= 2 and (
@@ -2668,7 +2743,7 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
                 or " ".join(norms[i + 2:i + 2 + L]).replace(" ", "") in admin_aliases
                 for L in range(1, min(5, max(0, len(norms) - (i + 2))) + 1)
             )
-        if is_street or is_route or is_admin_tail or is_level4 or is_recipient_tail or is_address_code_tail or is_house_street_tail or explicit_admin_tail or n in {"ql", "tl", "hl", "dt"}:
+        if is_street or is_route or is_admin_tail or is_level4 or is_location_center or is_recipient_tail or is_address_code_tail or is_house_street_tail or explicit_admin_tail or n in {"ql", "tl", "hl", "dt"}:
             if i == 0:
                 return ""
             cut = toks[i][1]
@@ -2678,6 +2753,10 @@ def _strip_poi_tail_v2(seg, admin_tail_aliases=None, admin_aliases=None):
         seg = seg[:cut]
     seg = re.sub(r"\b(?:số|so|sn)\s*\d+\w*(?:[/\-]\w+)*\b.*$", " ", seg, flags=re.I)
     if cut_by_street:
+        seg = re.sub(
+            r"\s+(?:(?:k|khu)\s*)?\d+\s+(?:phía|phia|pha)\s*$",
+            " ", seg, flags=re.I,
+        )
         seg = re.sub(r"\s+" + HOUSE_TOKEN_V2 + r"\s*$", " ", seg, flags=re.I)
     seg = _trim_admin_tail_aliases_v2(seg, admin_tail_aliases or set())
     return _clean_spaces_v2(seg)
@@ -2743,6 +2822,9 @@ def _extract_pois_v2(segments, admin_aliases, admin_tail_aliases=None):
             and any(w in {"khoa", "phong"} for w in before)
             and kw_phrase in {"trung tam y te", "ttyt", "tram y te", "benh vien", "bv", "truong"}
         )
+        before_is_poi_modifier = " ".join(before) in {
+            "tong", "tap doan", "tong tap doan",
+        }
         if before_has_signal:
             continue
 
@@ -2761,7 +2843,12 @@ def _extract_pois_v2(segments, admin_aliases, admin_tail_aliases=None):
         if kw_phrase == "den" and raw_kw != "đền":
             continue
 
-        if before and not before_is_department and (len(before) <= 4 or before_has_note_marker):
+        if (
+            before
+            and not before_is_department
+            and not before_is_poi_modifier
+            and (len(before) <= 4 or before_has_note_marker)
+        ):
             if not before_has_signal:
                 seg = seg[toks[start_tok][1]:]
         if re.match(r"^(?:sau|phia sau|dang sau|gan|doi dien|ben canh)\s+", _norm_match_v2(seg)):
@@ -2824,6 +2911,17 @@ def _postprocess_reported_poi_structures_v2(raw_text, pois, streets, level4_item
         replace_all("Tòa BIDV")
     elif re.search(r"\bbidv\s+cn\s+my\s+dinh\b", norm):
         replace_all("BIDV Chi nhánh Mỹ Đình")
+
+    # "Ủy Ban Xã Thôn A Xã B Tỉnh C": phần "Thôn A" là địa chỉ, còn tên
+    # đầy đủ của POI lấy từ xã được nêu rõ phía sau.
+    m = re.search(
+        r"\b(?:ủy|uy)\s+ban\s+xã\b.*?\bxã\s+"
+        r"(?P<name>.+?)(?=\s+(?:tỉnh|huyện|quận|thành\s+phố|thị\s+xã)\b|[,.;]|$)",
+        raw,
+        flags=re.I,
+    )
+    if m:
+        replace_all(f"Ủy Ban Xã {_pretty_piece_v2(m.group('name'))}")
 
     # Dấu chấm sau tên chùa là ranh giới sang địa chỉ hành chính.
     m = re.search(r"\bchùa\s+đội\s+(\d+)\b", raw, flags=re.I)
@@ -2901,11 +2999,24 @@ def _level4_unit_at_v2(norms, i, raws=None):
     n = norms[i]
     nxt = norms[i + 1] if i + 1 < len(norms) else ""
     nxt2 = norms[i + 2] if i + 2 < len(norms) else ""
+    # Từ trùng loại cấp 4 nhưng thực tế là phần cuối tên đường đã biết,
+    # ví dụ "Lý Thái Tổ".
+    for street_name in KNOWN_UNPREFIXED_STREET_NAMES_V2:
+        street_parts = street_name.split()
+        if (
+            street_parts
+            and street_parts[-1] == n
+            and i + 1 >= len(street_parts)
+            and norms[i + 1 - len(street_parts):i + 1] == street_parts
+        ):
+            return None
     if (n == "to" and nxt == "hop") or (n == "khu" and nxt == "to" and nxt2 == "hop"):
         # "Tổ hợp văn phòng/thương mại" không phải Tổ cấp 4.
         return None
     if n in {"thon", "xom", "ap", "khoi", "buon", "khom"}:
         return n, LEVEL4_UNIT_MAP_V2[n], 1
+    if n == "sap":
+        return "sap", "Sạp", 1
     if n in {"soc"}:
         return "soc", "Sóc", 1
     if n == "lang":
@@ -3520,6 +3631,15 @@ def _cut_detail_tail_v2(text, admin_aliases):
     if not toks:
         return ""
     raws = [unicodedata.normalize("NFC", w.lower()).strip(" ,.-–/:") for w, _, _ in toks]
+    full_norm = " ".join(norms)
+    for street_name in sorted(
+        KNOWN_UNPREFIXED_STREET_NAMES_V2,
+        key=lambda value: len(value.split()),
+        reverse=True,
+    ):
+        if full_norm == street_name or full_norm.startswith(street_name + " "):
+            word_count = len(street_name.split())
+            return text[:toks[word_count - 1][2]].strip(" ,.-–/:")
     starts_with_named_street = raws[0] in {"đường", "duong", "phố", "pho", "đê", "de"}
     # Kiểm tra xem có street keyword nào trong chuỗi không (để bảo vệ tên đường
     # dạng "Ngõ 43 Đường Ao Quan" — sau khi bỏ ngõ thì "Quan" là phần tên đường)
@@ -3842,7 +3962,7 @@ def _cut_street_at_structural_boundary_v2(detail):
     explicit_code = re.match(
         r"^\s*(?P<prefix>đường|duong|phố|pho|đê|de)\s+"
         r"(?P<code>(?:[A-Za-zĐđ]{0,4}\d+[A-Za-zĐđ0-9]*(?:[-/]\w+)+|\d{1,2}/\d{1,2}))"
-        r"(?=\s+\S)",
+        r"(?=\s+\S|$)",
         detail,
         flags=re.I,
     )
@@ -3894,11 +4014,29 @@ def _strip_name_before_mid_house_v2(detail):
     """Tên khách/note đứng TRƯỚC số nhà giữa chuỗi: "Loan Trần 235 Tô Hiệu" ->
     "Tô Hiệu" (235 là số nhà, phần trước là tên người). Dùng tín hiệu CẤU TRÚC
     (số nhà ở giữa) chứ không dựa vào tên, vì nhiều tên đường là tên người."""
+    _skip_before = {"so", "duong", "pho", "thang", "ql", "tl", "hl", "dt",
+                    "quoc", "tinh", "huong", "ngo", "ngach", "hem", "kiet"}
+    # Bắt số nhà có dấu gạch chéo trên chuỗi gốc trước khi tokenizer tách
+    # "180/7" thành hai token 180 và 7.
+    slash_house = re.search(
+        r"(?<!\w)\d+[A-Za-zĐđ]?(?:\s*/\s*\d+[A-Za-zĐđ]?)+\s+(?P<rest>.+)$",
+        detail,
+        flags=re.I,
+    )
+    if slash_house and slash_house.start() > 0:
+        prefix_norm = _norm_match_v2(detail[:slash_house.start()])
+        rest = slash_house.group("rest").strip(" ,.-–/:")
+        if (
+            prefix_norm
+            and prefix_norm.split()[-1] not in _skip_before
+            and _looks_like_street_v2(rest)
+            and not _is_garbage_street_v2(_pretty_street_v2(rest))
+        ):
+            return rest
+
     toks, norms = _word_spans_v2(detail)
     if len(toks) < 4:
         return detail
-    _skip_before = {"so", "duong", "pho", "thang", "ql", "tl", "hl", "dt",
-                    "quoc", "tinh", "huong", "ngo", "ngach", "hem", "kiet"}
     # tìm số nhà (>=2 chữ số hoặc có "/") ở vị trí >=2, không đứng đầu tên đường
     for i in range(2, len(norms) - 1):
         tok_raw = norms[i]
@@ -4007,6 +4145,10 @@ def _extract_streets_v2(segments, admin_aliases, fuzzy_out=None):
             ):
                 continue
             detail = seg[street_match[0]:]
+        if not detail:
+            mid_house_detail = _strip_name_before_mid_house_v2(seg)
+            if mid_house_detail != seg:
+                detail = mid_house_detail
         if not detail:
             candidate = _cut_detail_tail_v2(seg, admin_aliases)
             if _norm_match_v2(candidate) in KNOWN_UNPREFIXED_STREET_NAMES_V2:
@@ -4404,6 +4546,10 @@ def _is_garbage_street_v2(street):
     core = _street_core_norm_v2(street)
     if not core:
         return True
+    # Danh sách tên đường không tiền tố đã được xác nhận có thể chỉ gồm một
+    # từ (ví dụ "Yersin"). Không áp quy tắc loại ứng viên một chữ cho chúng.
+    if core in KNOWN_UNPREFIXED_STREET_NAMES_V2:
+        return False
     # Core chỉ còn đúng một loại đường (tên đã mất): "Đại Lộ", "Đường", "Phố"...
     if core in {
         "duong", "pho", "dai lo", "ngo", "ngach", "hem", "kiet",
@@ -4741,6 +4887,17 @@ def parse_address_components(raw, admin_names=None, debug=False):
     ward_aliases = _build_ward_aliases_from_admin_names_v2(admin_names or [])
     admin_tail_aliases = _build_admin_tail_aliases_v2(admin_names or [])
     province_aliases = _province_aliases_from_admin_v2(admin_names or [])
+    # Ghi chú ngoặc ở cuối về đơn vị cũ ("công an huyện cũ") chỉ là mô tả,
+    # không được quay lại thành POI sau khi đã nhận diện tỉnh.
+    old_unit_note = re.search(
+        r"\(\s*[^)]*\b(?:cũ|cu)\b[^)]*\)\s*$",
+        text,
+        flags=re.I,
+    )
+    if old_unit_note:
+        removed_parts.append(_pretty_piece_v2(old_unit_note.group(0).strip(" ()")))
+        text = text[:old_unit_note.start()].strip(" ,.-–/:;")
+        flags.append("NOTE_AFTER_ADDRESS_REMOVED")
     text, province_tail = _trim_after_province_v2(text, province_aliases)
     if province_tail:
         removed_parts.append(_pretty_piece_v2(province_tail))
