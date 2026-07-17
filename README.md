@@ -1,189 +1,205 @@
-# supership address cleaner (`vn-address-cleaner`)
+# Hướng dẫn Cài đặt & Chạy ứng dụng SuperShip Address Cleaner (`vn-address-cleaner`)
 
-python library and cli for cleaning supership-style vietnamese delivery address excel files.
-
----
-
-## 🚀 features
-
-- **accurate address parsing**: splits raw address text into 6 clean columns: `poi` (point of interest/specific name), `tên đường` (street name), `cấp 4` (level 4 details like thôn/xóm/ấp/tổ dân phố...), `phường/xã` (ward), `quận/huyện` (district), and `tỉnh/tp` (province).
-- **up-to-date administrative divisions (2025)**: automatically maps and updates addresses affected by the latest mergers or name changes in vietnam.
-- **hybrid rule-llm model**: 
-  - **80%–95% of rows**: processed instantly using the local rule parser, saving API costs and execution time.
-  - **ambiguous/error rows**: fallback to LLM (Cerebras/Gemini) for deep semantic processing.
-- **cost-efficient llm pipeline**: automatically deduplicates rows before calling the LLM API to minimize token usage.
-- **robust cli**: supports sequential queue mode (`--queue-all`) for large files (thousands of rows) with pacing and retry mechanisms to handle rate limits.
-- **local web ui**: upload multiple Excel files at once and download a consolidated, formatted spreadsheet.
-- **professional excel output**: formatted with frozen panes, colored headers, auto-fit column widths, and natural sorting (Province → District → Ward), divided into 4 sheets:
-  1. **địa chỉ sạch**: successfully cleaned addresses.
-  2. **cần kiểm tra**: rows requiring manual review (low confidence, old/new mergers, LLM failures) with specific reasons.
-  3. **dòng bị loại**: empty rows or rows where no level 4 details could be extracted.
-  4. **thống kê**: general stats (total input, duplicates, success rate, review count).
+Chào mừng bạn đến với **SuperShip Address Cleaner**! Đây là tài liệu hướng dẫn chi tiết từng bước (step-by-step) dành cho những thành viên mới clone dự án về máy tính cá nhân để có thể cài đặt môi trường, cấu hình và chạy thử ứng dụng một cách nhanh chóng nhất.
 
 ---
 
-## 🛠️ pipeline workflow
+## 🚀 Giới thiệu dự án
 
-```mermaid
-graph TD
-    a[input excel / raw address] --> b[pre-clean garbage & deduplicate]
-    b --> c[local rule parser]
-    c --> d{check confidence & flags?}
-    d -->|confident >= 0.90 & no hard flags| e[accept rule result]
-    d -->|ambiguous / low confidence| f[call llm api after deduplication]
-    f --> g[validator checks logic & evidence span]
-    g --> e
-    e --> h[sort & export 4-sheet excel]
-```
+`vn-address-cleaner` là một thư viện Python và công cụ dòng lệnh (CLI) mạnh mẽ dùng để chuẩn hóa, làm sạch địa chỉ giao hàng tiếng Việt từ các tệp Excel. 
+
+### Điểm nổi bật:
+- **Phân tách thông tin chính xác**: Phân chia chuỗi địa chỉ thô thành 6 cột chuẩn: `POI` (Điểm định vị/Tên riêng), `Tên đường`, `Cấp 4` (Thôn/Xóm/Ấp/Tổ dân phố...), `Phường/Xã`, `Quận/Huyện`, `Tỉnh/TP`.
+- **Cập nhật Địa giới Hành chính mới nhất (2025)**: Tích hợp dữ liệu chuẩn hóa hành chính của Việt Nam, tự động xử lý các trường hợp đổi tên, sáp nhập xã/phường/quận/huyện.
+- **Mô hình kết hợp Rule-LLM thông minh**:
+  - **Rule-based (80% - 95% số dòng)**: Xử lý cục bộ bằng thuật toán nhanh chóng và chính xác với những địa chỉ rõ ràng, giúp tiết kiệm chi phí API và thời gian.
+  - **LLM Fallback (Cerebras API / Llama-3)**: Tự động phát hiện và gửi các dòng địa chỉ mơ hồ, phức tạp hoặc bị lỗi cấu trúc lên LLM để phân tích ngữ nghĩa sâu.
+- **Tiết kiệm chi phí**: Hệ thống tự gom nhóm địa chỉ (deduplication) để loại bỏ trùng lặp trước khi gửi lên API của LLM.
+- **Local Web UI & CLI**: Cung cấp giao diện Web trực quan (kéo thả và tải về file kết quả gộp) lẫn giao diện dòng lệnh (CLI) mạnh mẽ hỗ trợ xử lý hàng chờ tuần tự (`--queue-all`) cho các file dữ liệu cực lớn (hàng ngàn dòng).
 
 ---
 
-## 💻 installation
+## 🛠️ Yêu cầu hệ thống
 
-requires python 3.10 or newer.
+Trước khi bắt đầu, hãy đảm bảo máy tính của bạn đã cài đặt:
+- **Python**: Phiên bản `3.10` trở lên.
+- **Git**: Để clone mã nguồn.
 
-### 1. install basic mode (rule-only)
+---
 
+## 📦 Hướng dẫn cài đặt step-by-step
+
+Thực hiện các bước sau để thiết lập môi trường chạy dự án:
+
+### Bước 1: Clone mã nguồn
+Mở Terminal (macOS/Linux) hoặc Command Prompt/PowerShell (Windows) và chạy lệnh:
 ```bash
-cd /Users/dangkhoii/convert_adderss
-python3 -m pip install -e .
+git clone git@github.com:khoipd0202/supership-address-cleaner.git
+# Hoặc dùng HTTPS nếu bạn chưa thiết lập SSH key:
+# git clone https://github.com/khoipd0202/supership-address-cleaner.git
+
+cd supership-address-cleaner
 ```
 
-### 2. install advanced mode (with llm support)
+### Bước 2: Tạo và kích hoạt môi trường ảo (Virtual Environment)
+Việc sử dụng môi trường ảo sẽ giúp cô lập các thư viện của dự án, tránh xung đột với các phiên bản Python khác trên máy của bạn:
 
+- **Trên macOS / Linux:**
+  ```bash
+  python3 -m venv .venv
+  source .venv/bin/activate
+  ```
+- **Trên Windows (PowerShell):**
+  ```powershell
+  python -m venv .venv
+  .venv\Scripts\Activate.ps1
+  ```
+- **Trên Windows (CMD):**
+  ```cmd
+  python -m venv .venv
+  .venv\Scripts\activate.bat
+  ```
+
+Sau khi kích hoạt, bạn sẽ thấy ký hiệu `(.venv)` xuất hiện ở đầu dòng lệnh của Terminal.
+
+### Bước 3: Nâng cấp công cụ quản lý thư viện pip
 ```bash
-python3 -m pip install -e ".[llm]"
+python3 -m pip install --upgrade pip
 ```
+
+### Bước 4: Cài đặt thư viện ở chế độ phát triển (Editable Mode)
+Chọn một trong hai chế độ cài đặt dưới đây tùy vào nhu cầu của bạn:
+
+1. **Chế độ Cơ bản (Chỉ dùng Rule-based cục bộ, không gọi LLM):**
+   ```bash
+   python3 -m pip install -e .
+   ```
+2. **Chế độ Đầy đủ (Hỗ trợ gọi LLM qua Cerebras API):**
+   ```bash
+   python3 -m pip install -e ".[llm]"
+   ```
 
 ---
 
-## 🔑 environment variables
+## 🔑 Cấu hình Biến môi trường (Environment Variables)
 
-if using the llm feature, create a `.env` file in the root directory or set the environment variables:
+Nếu bạn muốn sử dụng chức năng nâng cao (gọi LLM xử lý các địa chỉ mơ hồ), bạn cần thiết lập API Key:
 
-```env
-CEREBRAS_API_KEY="your_api_key_here"
+1. Sao chép tệp mẫu `.env.example` thành `.env`:
+   ```bash
+   cp .env.example .env
+   ```
+2. Mở file `.env` bằng bất kỳ trình soạn thảo văn bản nào và cấu hình các giá trị:
+   ```env
+   # API Key của Cerebras (lấy miễn phí tại trang chủ Cerebras Cloud)
+   CEREBRAS_API_KEY="csk-your_actual_api_key_here"
 
-# advanced cerebras configurations (optional)
-CEREBRAS_MODEL="gpt-oss-120b"
-CEREBRAS_BATCH_SIZE=5
-CEREBRAS_MAX_ROWS_PER_RUN=150
-CEREBRAS_PACING_SEC=2.2
-```
+   # Các cấu hình nâng cao khác (đã cấu hình sẵn mặc định)
+   CEREBRAS_MODEL="gpt-oss-120b"
+   CEREBRAS_BATCH_SIZE=5
+   CEREBRAS_MAX_ROWS_PER_RUN=30
+   ```
 
 ---
 
-## 📖 cli usage
+## 🖥️ Hướng dẫn chạy và sử dụng dự án
 
-use the `vn-address-clean` command after installation or run the module directly:
+Dự án cung cấp 3 cách sử dụng chính tùy thuộc vào mục đích của bạn:
 
-### 1. basic run
+### Cách 1: Sử dụng qua Giao diện Web (Local Web UI)
+Đây là cách dễ nhất cho người dùng thông thường, hỗ trợ upload nhiều file Excel cùng lúc và tự động gộp kết quả tải xuống.
 
-clean a single excel file:
-```bash
-vn-address-clean input.xlsx -o output.xlsx
-```
+1. Chạy file giao diện Web cục bộ:
+   ```bash
+   python3 address_ui.py
+   ```
+   *(Mặc định server sẽ chạy tại cổng `8899`. Nếu muốn chạy cổng khác, ví dụ cổng `9000`, hãy dùng lệnh: `python3 address_ui.py 9000`)*.
+2. Mở trình duyệt web bất kỳ và truy cập địa chỉ:
+   ```text
+   http://127.0.0.1:8899
+   ```
+3. Kéo thả hoặc chọn các file Excel cần làm sạch, cấu hình tùy chọn LLM (nếu có API Key), bấm nút chạy và tải về file kết quả gộp cuối cùng.
 
-run without installing the console command:
+### Cách 2: Sử dụng qua Dòng lệnh (CLI)
+Sau khi cài đặt thành công ở Bước 4, hệ thống đã tự động đăng ký lệnh `vn-address-clean` toàn cục (trong môi trường ảo `.venv`).
+
+- **Xử lý cơ bản (Chỉ dùng Rules):**
+  ```bash
+  vn-address-clean input.xlsx -o output.xlsx
+  ```
+- **Xử lý nâng cao (Bật LLM hỗ trợ các dòng khó):**
+  ```bash
+  vn-address-clean input.xlsx -o output.xlsx --cerebras
+  ```
+- **Chế độ xử lý tuần tự (Hàng chờ an toàn cho tệp lớn):**
+  Khi xử lý file lớn (từ 5,000 đến 10,000 dòng), bạn nên dùng cờ `--queue-all`. Hệ thống sẽ gửi tuần tự các dòng mơ hồ lên LLM, tự động giãn cách nhịp yêu cầu và tự thử lại (backoff) nếu bị chạm giới hạn tần suất gọi API (Rate Limit / HTTP 429).
+  ```bash
+  vn-address-clean input.xlsx -o output.xlsx --queue-all
+  ```
+- **Các cờ tùy chọn hữu ích:**
+  - `--include-empty-rows`: Giữ nguyên và đưa các dòng không bóc tách được chi tiết (trống POI/Đường/Cấp 4) vào file đầu ra thay vì lọc bỏ.
+  - `--combined-row`: Gộp các thành phần địa chỉ chi tiết trong một dòng Excel duy nhất thay vì tách nhỏ ra các dòng con.
+  - `--sheet-name "Tên Sheet"`: Chọn tên Sheet cụ thể cần đọc trong file Excel.
+
+*Mẹo: Nếu bạn không muốn cài đặt lệnh toàn cục, bạn vẫn có thể chạy trực tiếp module python:*
 ```bash
 python3 -m vn_address_cleaner.cli input.xlsx -o output.xlsx
 ```
 
-### 2. advanced options
+### Cách 3: Sử dụng dưới dạng Thư viện Python (Library Usage)
+Tích hợp quy trình chuẩn hóa địa chỉ trực tiếp vào code Python của bạn:
 
-- **enable cerebras llm**:
-  ```bash
-  vn-address-clean input.xlsx -o output.xlsx --cerebras
+- **Làm sạch tệp Excel:**
+  ```python
+  from vn_address_cleaner import clean_excel
+
+  stats = clean_excel(
+      input_path="data/orders.xlsx",
+      output_path="outputs/cleaned_orders.xlsx",
+      use_cerebras=True,          # Bật LLM fallback cho các dòng khó
+      split_components=True,      # Tách nhỏ các thành phần POI/Street/Level 4 ra các dòng riêng biệt
+  )
+  print("Thống kê kết quả:", stats.as_dict())
   ```
-- **sequential queue mode (large files)**:
-  > [!TIP]
-  > the `--queue-all` flag processes all ambiguous rows sequentially without limits, adjusting request rate (`CEREBRAS_PACING_SEC`) and retrying when rate-limited (HTTP 429).
-  ```bash
-  vn-address-clean input.xlsx -o output.xlsx --queue-all
-  ```
-- **keep empty/un-extracted rows**:
-  ```bash
-  vn-address-clean input.xlsx -o output.xlsx --include-empty-rows
-  ```
-- **keep results combined in a single row instead of splitting them**:
-  ```bash
-  vn-address-clean input.xlsx -o output.xlsx --combined-row
-  ```
-- **specify worksheet name**:
-  ```bash
-  vn-address-clean input.xlsx -o output.xlsx --sheet-name "Sheet1"
+- **Làm sạch một chuỗi địa chỉ duy nhất:**
+  ```python
+  from vn_address_cleaner import AddressCleaner
+
+  cleaner = AddressCleaner()
+  result = cleaner.clean(
+      raw_address="Trường Cao Đẳng Cơ Giới Ninh Bình, Đường Vũ Duy Thanh, Tổ 2, Phường Yên Bình, Thành phố Tam Điệp, Ninh Bình",
+      ward="Yên Bình",
+      district="Tam Điệp",
+      province="Ninh Bình",
+  )
+
+  print("Mảng xuất Excel:", result.as_output_row())
+  # Kỳ vọng xuất ra: ["Trường Cao Đẳng Cơ Giới Ninh Bình", "Đường Vũ Duy Thanh", "Tổ 2", "Phường Yên Bình", "Thành phố Tam Điệp", "Tỉnh Ninh Bình"]
   ```
 
 ---
 
-## 🐍 python library usage
+## 🧪 Chạy Kiểm thử (Testing)
 
-### 1. clean a full excel file
+Để đảm bảo các quy tắc phân tách địa chỉ và việc tích hợp LLM hoạt động đúng như mong đợi, hãy chạy bộ kiểm thử tự động:
 
-```python
-from vn_address_cleaner import clean_excel
-
-# returns a CleanStats object containing processing statistics
-stats = clean_excel(
-    input_path="data/orders.xlsx",
-    output_path="outputs/cleaned_orders.xlsx",
-    use_cerebras=True,          # enable llm fallback for ambiguous rows
-    split_components=True,      # split components into separate rows
-)
-
-print(stats.as_dict())
-```
-
-### 2. clean a single raw address
-
-```python
-from vn_address_cleaner import AddressCleaner
-
-cleaner = AddressCleaner()
-
-result = cleaner.clean(
-    raw_address="Trường Cao Đẳng Cơ Giới Ninh Bình, Đường Vũ Duy Thanh, Tổ 2, Phường Yên Bình, Thành phố Tam Điệp, Ninh Bình",
-    ward="Yên Bình",
-    district="Tam Điệp",
-    province="Ninh Bình",
-)
-
-# returns the output row as a list matching the excel columns
-print(result.as_output_row())
-# expected: ["Trường Cao Đẳng Cơ Giới Ninh Bình", "Đường Vũ Duy Thanh", "Tổ 2", "Phường Yên Bình", "Thành phố Tam Điệp", "Tỉnh Ninh Bình"]
-```
+- **Chạy kiểm thử các logic cốt lõi & rules:**
+  ```bash
+  python3 -m unittest discover -s tests -p 'test*.py'
+  ```
+- **Chạy các kịch bản kiểm thử tích hợp (LLM, thư viện nâng cao):**
+  ```bash
+  python3 -m unittest discover -s scratch -p 'test*.py'
+  ```
 
 ---
 
-## 🖥️ local web ui
-
-run the local web server:
-
-```bash
-python3 address_ui.py
-```
-
-then open in your browser:
-```text
-http://127.0.0.1:8899
-```
-
-> [!NOTE]
-> when uploading multiple files together, the ui downloads one consolidated `cleaned_address_files.xlsx`. each sheet includes a `Tên file nguồn` column so rows from different uploads remain distinguishable.
-
----
-
-## 🧪 testing
-
-run tests to verify parsing rules and llm integration:
-
-```bash
-python3 -m unittest discover -s scratch -p 'test*.py'
-```
-
----
-
-## 🔒 privacy
+## 🛡️ Bảo mật và Quyền riêng tư (Privacy)
 
 > [!CAUTION]
-> never commit actual customer order files, generated outputs, local sqlite databases (`cache_diachi.sqlite`), or sensitive files to public git branches. verify your `.gitignore` before pushing.
+> Dữ liệu địa chỉ giao hàng và thông tin khách hàng là cực kỳ nhạy cảm.
+> - **Không bao giờ** commit các tệp tin Excel thực tế của khách hàng, các tệp kết quả xử lý nằm trong thư mục `outputs/`, hoặc tệp cache SQLite địa phương (`cache_diachi.sqlite`) lên các kho lưu trữ công khai như GitHub.
+> - Hãy kiểm tra kỹ tệp `.gitignore` trước khi thực hiện các lệnh push commit lên server.
+
+---
+Chúc bạn cài đặt thành công và làm việc hiệu quả với dự án! Nếu gặp bất kỳ khó khăn nào trong quá trình cài đặt, vui lòng liên hệ với quản trị viên dự án hoặc tạo issues trên kho mã nguồn.
